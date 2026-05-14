@@ -111,6 +111,31 @@ def extract_entities_from_text(text: str, memory_entities: Dict[str, Any]) -> Di
     text_lower = text.lower()
     updated = dict(memory_entities)
 
+    # User name extraction
+    # English: "my name is X", "I am X", "I'm X", "call me X"
+    name_match = re.search(
+        r"(?:my name is|i am|i'm|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+        text,
+    )
+    if name_match:
+        updated["user_name"] = name_match.group(1).strip()
+    # Hindi/Hinglish: "mera naam X hai", "mujhe X kehte hain"
+    if not updated.get("user_name"):
+        hi_match = re.search(
+            r"(?:mera naam|mujhe)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+            text,
+        )
+        if hi_match:
+            updated["user_name"] = hi_match.group(1).strip()
+    # Spanish: "me llamo X", "mi nombre es X"
+    if not updated.get("user_name"):
+        es_match = re.search(
+            r"(?:me llamo|mi nombre es)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            text,
+        )
+        if es_match:
+            updated["user_name"] = es_match.group(1).strip()
+
     # Order ID extraction
     if not updated.get("order_id"):
         match = re.search(r"\border\s*(?:id|number|#)?\s*[:\-]?\s*(\d{4,})", text_lower)

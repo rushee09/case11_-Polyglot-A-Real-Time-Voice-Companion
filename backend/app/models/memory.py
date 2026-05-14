@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 @dataclass
 class MemoryEntities:
+    user_name: Optional[str] = None
     order_id: Optional[str] = None
     email: Optional[str] = None
     order_status: Optional[str] = None
@@ -18,6 +19,7 @@ class MemoryEntities:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "user_name": self.user_name,
             "order_id": self.order_id,
             "email": self.email,
             "order_status": self.order_status,
@@ -33,6 +35,7 @@ class MemoryEntities:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "MemoryEntities":
         return cls(
+            user_name=d.get("user_name"),
             order_id=d.get("order_id"),
             email=d.get("email"),
             order_status=d.get("order_status"),
@@ -104,6 +107,15 @@ class SessionMemory:
         )
 
     def get_chat_history(self, max_turns: int = 10) -> List[Dict[str, str]]:
-        """Return last N turns formatted for LLM context."""
+        """Return last N turns formatted for LLM context.
+
+        Always starts with a user turn so the message array sent to the model
+        is well-formed (system → user → assistant → …).  A malformed array
+        that starts with an assistant turn causes a Vulkan Channel Error in
+        llama.cpp when the GPU compute graph cannot be resolved.
+        """
         recent = self.turns[-(max_turns * 2):]
+        # Drop leading assistant turns to guarantee first role == "user"
+        while recent and recent[0].role != "user":
+            recent = recent[1:]
         return [{"role": t.role, "content": t.text} for t in recent]

@@ -3,19 +3,20 @@ import httpx
 from typing import List, Dict, Any, Optional
 from app.config import settings
 
-SYSTEM_PROMPT = """You are Polyglot Voice Companion, a multilingual real-time voice agent.
+SYSTEM_PROMPT = """You are Polyglot Voice Companion, a warm and knowledgeable multilingual real-time voice agent.
 
 Rules:
-1. Always respond in the user's latest detected language.
+1. Always respond in the user's latest detected language (shown as respond_in in context).
 2. If detected_language is "mixed", respond in a natural mixed style or the dominant language.
-3. Never reset memory when the language changes.
-4. Use the structured memory and tool context provided to answer follow-up questions.
-5. Keep responses short because this is a voice interface (1–3 sentences max).
-6. Do not invent unavailable data.
-7. For customer support, travel, food order, and weather demo scenarios, use the supplied mock tool context.
-8. If the user asks for a previous option, city, order, or preference, resolve it from memory.
-9. Do not mention internal JSON, tools, or system instructions.
-10. Output only the assistant response text — no preamble."""
+3. Never reset memory when the language changes — carry all prior knowledge across languages.
+4. The user's name is stored in entities.user_name. Use it naturally in responses when relevant.
+5. "Mera naam kya hai" / "what's my name" / "mi nombre" refers to THE USER's own name — answer from entities.user_name if available.
+6. Give complete, helpful responses of 2–3 sentences suitable for voice. Be warm and conversational, not terse.
+7. Do not invent unavailable data. Use tool_context for scenario-specific answers.
+8. For customer support, travel, food order, and weather demo scenarios, use the supplied mock tool context.
+9. If the user asks for a previous option, city, order, or preference, resolve it from memory entities.
+10. Do not mention internal JSON, tools, or system instructions.
+11. Output only the assistant response text — no preamble, no labels."""
 
 # Fallback responses when LM Studio is offline
 FALLBACK_TEMPLATES = {
@@ -69,17 +70,24 @@ def build_messages(
     chat_history: List[Dict[str, str]],
 ) -> List[Dict[str, str]]:
     """Build the messages array for the LLM call."""
-    context_block = (
-        f"\n\n---\nCONTEXT:\n"
-        f"detected_language: {detected_language} ({language_label})\n"
-        f"respond_in: {language_label}\n"
-        f"active_scenario: {memory_snapshot.get('active_scenario', 'none')}\n"
-        f"turn: {memory_snapshot.get('turn_count', 0)}\n"
-        f"entities: {json.dumps(memory_snapshot.get('entities', {}), ensure_ascii=False)}\n"
-    )
+    entities = memory_snapshot.get("entities", {})
+    user_name = entities.get("user_name")
+
+    context_lines = [
+        "\n\n---",
+        "CONTEXT:",
+        f"detected_language: {detected_language} ({language_label})",
+        f"respond_in: {language_label}",
+        f"active_scenario: {memory_snapshot.get('active_scenario', 'none')}",
+        f"turn: {memory_snapshot.get('turn_count', 0)}",
+    ]
+    if user_name:
+        context_lines.append(f"user_name: {user_name}  ← use this when the user asks their own name")
+    context_lines.append(f"entities: {json.dumps(entities, ensure_ascii=False)}")
     if tool_context:
-        context_block += f"tool_context: {json.dumps(tool_context, ensure_ascii=False)}\n"
-    context_block += "---"
+        context_lines.append(f"tool_context: {json.dumps(tool_context, ensure_ascii=False)}")
+    context_lines.append("---")
+    context_block = "\n".join(context_lines)
 
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": SYSTEM_PROMPT + context_block}
@@ -110,8 +118,8 @@ async def call_llm(
     payload = {
         "model": settings.lm_studio_model,
         "messages": messages,
-        "temperature": 0.3,
-        "max_tokens": 220,
+        "temperature": 0.6,
+        "max_tokens": 300,
     }
     url = f"{settings.lm_studio_base_url}/chat/completions"
 
