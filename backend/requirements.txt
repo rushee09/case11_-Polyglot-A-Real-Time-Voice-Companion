@@ -1,0 +1,18 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+httpx>=0.27.0
+python-dotenv>=1.0.1
+pydantic>=2.7.0
+pydantic-settings>=2.2.1
+aiofiles>=23.2.1
+websockets>=12.0
+pytest>=8.2.0
+pytest-asyncio>=0.23.7
+langdetect>=1.0.9
+
+# ASR
+faster-whisper>=1.0.1
+
+# Storage - install if Supabase is configured
+# supabase>=2.4.0
