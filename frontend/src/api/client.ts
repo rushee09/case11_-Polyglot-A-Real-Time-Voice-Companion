@@ -132,6 +132,15 @@ export async function apiGetSessionLogs(sessionId: string) {
   return r.json();
 }
 
+export function downloadChatCsv() {
+  const a = document.createElement("a");
+  a.href = `${API_BASE}/api/export-csv`;
+  a.download = "polyglot_chat_history.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 export function createWebSocket(sessionId: string): WebSocket {
   return new WebSocket(`${getWsBase()}/ws/session/${sessionId}`);
 }

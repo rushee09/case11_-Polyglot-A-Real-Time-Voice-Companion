@@ -52,7 +52,7 @@ export default function LandingPage() {
           { icon: "💾", title: "Memory", desc: "Structured entities\nacross lang switches" },
           { icon: "🔊", title: "TTS", desc: "Browser speechSynthesis\ninstant playback" },
         ].map((item) => (
-          <div key={item.title} className="glass p-4 text-center">
+          <div key={item.title} className="glass-card p-4 text-center hover:bg-white/[0.07] transition-colors">
             <div className="text-2xl mb-2">{item.icon}</div>
             <p className="text-sm font-semibold text-white/80">{item.title}</p>
             <p className="text-xs text-white/35 mt-1 whitespace-pre-line leading-relaxed">

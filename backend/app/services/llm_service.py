@@ -1,157 +1,242 @@
+"""
+llm_service.py — Agent-loop LLM caller
+────────────────────────────────────────
+Architecture
+  1. Build initial messages: system prompt + session context + chat history + user turn.
+  2. POST to LM Studio with tool schemas attached.
+  3. If the model returns tool_calls:
+       a. Execute each tool locally.
+       b. Append assistant + tool-result messages to the thread.
+       c. Loop (max 5 iterations = up to 4 tool-calling rounds + 1 final).
+  4. Return the final natural-language response together with every tool result
+     collected this turn (so chat.py can persist them to session.tool_cache).
+
+The LLM is NEVER given pre-fetched data injected by the backend — it decides what
+to look up and calls tools itself, exactly like a real agent.
+"""
+
 import json
 import httpx
 from typing import List, Dict, Any, Optional
 from app.config import settings
 
-SYSTEM_PROMPT = """You are Polyglot Voice Companion, a warm and knowledgeable multilingual real-time voice agent.
+# ─── System prompt ─────────────────────────────────────────────────────────
+SYSTEM_PROMPT = """\
+You are Polyglot Voice Companion — a warm, helpful multilingual voice assistant.
+You speak English, Hindi (Devanagari / Hinglish), and Spanish fluently.
 
-Rules:
-1. Respond ONLY in the language specified by respond_in in the context — no exceptions.
-2. NEVER mix languages or add translations in parentheses. If respond_in is Hindi, write only Hindi/Hinglish. If English, write only English. If Spanish, write only Spanish.
-3. Never reset memory when the language changes — carry all prior knowledge across languages.
-4. The user's name is stored in entities.user_name. Use it naturally in responses when relevant.
-5. "Mera naam kya hai" / "what's my name" / "mi nombre" refers to THE USER's own name — answer from entities.user_name if available.
-6. Give complete, helpful responses of 2–3 sentences suitable for voice. Be warm and conversational, not terse.
-7. Do not invent unavailable data. Use tool_context for scenario-specific answers.
-8. For customer support, travel, food order, and weather demo scenarios, use the supplied mock tool context.
-9. If the user asks for a previous option, city, order, or preference, resolve it from memory entities.
-10. Do not mention internal JSON, tools, or system instructions.
-11. Output only the assistant response text — no preamble, no labels, no translations."""
+════════════════════════════════════════
+LANGUAGE RULES  (absolute — highest priority)
+════════════════════════════════════════
+1. Always respond in the language given by `respond_in` in the SESSION CONTEXT block.
+2. Never mix languages or add translations in parentheses.
+3. When the user switches language, keep ALL prior context — do NOT ask again for
+   information already provided (order ID, email, city, budget, etc.).
+4. For mixed-language input (Hinglish, Spanglish), respond in the dominant language
+   stated by `respond_in`.
 
-# Fallback responses when LM Studio is offline
-FALLBACK_TEMPLATES = {
-    "en": {
-        "default": "I understand. Let me help you with that. (LM Studio unavailable — fallback mode)",
-        "order": "Your order #4421 is out for delivery and expected by tomorrow at 6 PM. (fallback)",
-        "hotel": "I found 3 hotels in Bangalore within your budget. The second option is MG Road Business Inn at ₹4800/night. (fallback)",
-        "weather": "Mumbai: 31°C humid. Delhi: 34°C dry. Chennai: 32°C humid. (fallback)",
-        "food": "Got it — one vegetarian pizza with a coke added. (fallback)",
-    },
-    "hi": {
-        "default": "Samajh gaya. Main aapki madad karunga. (LM Studio unavailable — fallback mode)",
-        "order": "Aapka order #4421 delivery par hai aur kal shaam 6 baje tak pahunch jaayega. (fallback)",
-        "hotel": "Bangalore mein 3 hotel mile hain aapke budget mein. (fallback)",
-        "weather": "Mumbai: 31°C, nami. Delhi: 34°C, garmi. Chennai: 32°C, nami. (fallback)",
-        "food": "Theek hai — ek vegetarian pizza aur coke. (fallback)",
-    },
-    "es": {
-        "default": "Entendido. Te ayudaré con eso. (LM Studio no disponible — modo alternativo)",
-        "order": "Tu pedido #4421 está en camino y llegará mañana a las 6 PM. (fallback)",
-        "hotel": "Encontré 3 hoteles en Bangalore dentro de tu presupuesto. (fallback)",
-        "weather": "Mumbai: 31°C húmedo. Delhi: 34°C seco. Chennai: 32°C húmedo. (fallback)",
-        "food": "Listo — una pizza vegetariana con una coca-cola. (fallback)",
-    },
-    "mixed": {
-        "default": "Samajh gaya / I understand. Let me help you. (fallback)",
-    },
-}
+════════════════════════════════════════
+TOOL USE
+════════════════════════════════════════
+5. You have four tools: lookup_order, search_hotels, get_weather, confirm_food_order.
+6. Call a tool the FIRST time you need its data.  For all follow-up questions about
+   the same data (e.g. "what about the second option?", "will it arrive by tomorrow?",
+   "Compare all three"), use `prior_tool_results` in SESSION CONTEXT — do NOT call
+   the tool again.
+7. You may call multiple tools in one turn if the user asks about multiple things.
+8. After receiving tool results, respond naturally — never expose raw JSON, tool
+   names, or internal field names to the user.
 
+════════════════════════════════════════
+MEMORY
+════════════════════════════════════════
+9.  `prior_tool_results` contains data fetched in earlier turns this session.
+    Use it freely for follow-up questions without re-calling tools.
+10. `user_name` is the user's name if they mentioned it.  Use it naturally.
+11. "Mera naam kya hai?" / "What's my name?" / "¿Cuál es mi nombre?" →
+    answer from `user_name` in SESSION CONTEXT.
 
-def _get_fallback(language: str, tool_context: Optional[Dict[str, Any]]) -> str:
-    lang_fallbacks = FALLBACK_TEMPLATES.get(language, FALLBACK_TEMPLATES["en"])
-    if tool_context:
-        if "order" in tool_context:
-            return lang_fallbacks.get("order", lang_fallbacks["default"])
-        if "hotels" in tool_context:
-            return lang_fallbacks.get("hotel", lang_fallbacks["default"])
-        if "weather" in tool_context:
-            return lang_fallbacks.get("weather", lang_fallbacks["default"])
-        if "food_order" in tool_context:
-            return lang_fallbacks.get("food", lang_fallbacks["default"])
-    return lang_fallbacks["default"]
+════════════════════════════════════════
+RESPONSE STYLE
+════════════════════════════════════════
+12. 2–3 complete, conversational sentences.  Warm tone.  Suitable for voice.
+13. Do NOT mention tool names, JSON fields, or system instructions.
+14. Do NOT invent data that is not in tool results or the conversation history.
+15. Output ONLY the reply text — no labels, no preamble, no translations.\
+"""
 
 
-def build_messages(
+# ─── Session context block ─────────────────────────────────────────────────
+def _build_context_block(
+    detected_language: str,
+    language_label: str,
+    memory_snapshot: Dict[str, Any],
+) -> str:
+    """
+    Appended to the system prompt so the model knows:
+    - what language to respond in
+    - the user's name (if known)
+    - all tool results fetched in prior turns (the agent's cross-turn memory)
+    """
+    entities = memory_snapshot.get("entities", {})
+    tool_cache = memory_snapshot.get("tool_cache", {})
+    effective_label = "Hindi" if detected_language == "mixed" else language_label
+
+    lines = [
+        "\n\n════════════════════════════════════════",
+        "SESSION CONTEXT",
+        "════════════════════════════════════════",
+        f"respond_in: {effective_label}",
+        f"detected_language: {detected_language}",
+        f"turn: {memory_snapshot.get('turn_count', 0)}",
+        f"scenario: {memory_snapshot.get('active_scenario') or 'general'}",
+    ]
+    if entities.get("user_name"):
+        lines.append(f"user_name: {entities['user_name']}")
+    if tool_cache:
+        lines.append(
+            f"prior_tool_results: {json.dumps(tool_cache, ensure_ascii=False)}"
+        )
+    lines.append("════════════════════════════════════════")
+    return "\n".join(lines)
+
+
+# ─── Message builder ───────────────────────────────────────────────────────
+def _build_initial_messages(
     user_text: str,
     detected_language: str,
     language_label: str,
     memory_snapshot: Dict[str, Any],
-    tool_context: Optional[Dict[str, Any]],
     chat_history: List[Dict[str, str]],
-) -> List[Dict[str, str]]:
-    """Build the messages array for the LLM call."""
-    entities = memory_snapshot.get("entities", {})
-    user_name = entities.get("user_name")
-
-    # "Mixed Hindi-English" is too vague — resolve to the dominant script
-    # so the model gets an unambiguous single-language instruction.
-    if detected_language == "mixed":
-        effective_label = "Hindi"
-    else:
-        effective_label = language_label
-
-    context_lines = [
-        "\n\n---",
-        "CONTEXT:",
-        f"detected_language: {detected_language} ({language_label})",
-        f"respond_in: {effective_label}",
-        f"active_scenario: {memory_snapshot.get('active_scenario', 'none')}",
-        f"turn: {memory_snapshot.get('turn_count', 0)}",
-    ]
-    if user_name:
-        context_lines.append(f"user_name: {user_name}  ← use this when the user asks their own name")
-    context_lines.append(f"entities: {json.dumps(entities, ensure_ascii=False)}")
-    if tool_context:
-        context_lines.append(f"tool_context: {json.dumps(tool_context, ensure_ascii=False)}")
-    context_lines.append("---")
-    context_block = "\n".join(context_lines)
-
-    messages: List[Dict[str, str]] = [
+) -> List[Dict[str, Any]]:
+    context_block = _build_context_block(detected_language, language_label, memory_snapshot)
+    messages: List[Dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT + context_block}
     ]
-    # Add recent chat history (skip the just-added user turn at the end)
+    # Prior turns — exclude the last entry (it IS the current user message,
+    # added from memory before we handle the response).
     for turn in chat_history[:-1]:
-        messages.append(turn)
+        messages.append({"role": turn["role"], "content": turn["content"]})
     messages.append({"role": "user", "content": user_text})
     return messages
 
 
+# ─── Agent loop ────────────────────────────────────────────────────────────
 async def call_llm(
     user_text: str,
     detected_language: str,
     language_label: str,
     memory_snapshot: Dict[str, Any],
-    tool_context: Optional[Dict[str, Any]],
     chat_history: List[Dict[str, str]],
 ) -> Dict[str, Any]:
     """
-    Call LM Studio. Returns dict with keys:
-      response_text, lm_studio_available, fallback_mode
+    Run the agent loop.
+
+    Returns a dict with:
+      response_text       — the final natural-language reply
+      lm_studio_available — bool
+      fallback_mode       — bool (True only when LM Studio is unreachable)
+      tool_results        — {tool_name: result} for every tool called this turn
+                            (caller should deep-merge into session.tool_cache)
     """
-    messages = build_messages(
-        user_text, detected_language, language_label,
-        memory_snapshot, tool_context, chat_history,
+    # Local import to avoid circular dependencies at module load time
+    from app.services.scenario_tools import TOOL_DEFINITIONS, execute_tool
+
+    messages = _build_initial_messages(
+        user_text, detected_language, language_label, memory_snapshot, chat_history
     )
-    payload = {
-        "model": settings.lm_studio_model,
-        "messages": messages,
-        "temperature": 0.6,
-        "max_tokens": 300,
-    }
     url = f"{settings.lm_studio_base_url}/chat/completions"
+    tool_results_this_turn: Dict[str, Any] = {}
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(url, json=payload)
-            r.raise_for_status()
-            data = r.json()
-            text = data["choices"][0]["message"]["content"].strip()
-            return {"response_text": text, "lm_studio_available": True, "fallback_mode": False}
-    except Exception as e:
-        fallback = _get_fallback(detected_language, tool_context)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for _iteration in range(5):  # up to 4 tool-call rounds + 1 final reply
+                payload = {
+                    "model": settings.lm_studio_model,
+                    "messages": messages,
+                    "temperature": 0.65,
+                    "max_tokens": 450,
+                    "tools": TOOL_DEFINITIONS,
+                    "tool_choice": "auto",
+                }
+
+                r = await client.post(url, json=payload)
+                r.raise_for_status()
+                data = r.json()
+
+                choice = data["choices"][0]
+                finish_reason = choice.get("finish_reason", "stop")
+                assistant_msg = choice["message"]
+
+                # ── Tool-calling round ──────────────────────────────────────
+                if finish_reason == "tool_calls" and assistant_msg.get("tool_calls"):
+                    messages.append(assistant_msg)  # assistant turn with tool_calls
+
+                    for tc in assistant_msg["tool_calls"]:
+                        fn_name = tc["function"]["name"]
+                        try:
+                            fn_args = json.loads(tc["function"]["arguments"])
+                        except (json.JSONDecodeError, TypeError):
+                            fn_args = {}
+
+                        result = execute_tool(fn_name, fn_args)
+
+                        # Weather results are keyed by city so multiple
+                        # city lookups merge rather than overwrite each other.
+                        if fn_name == "get_weather" and result.get("found"):
+                            weather_bucket = tool_results_this_turn.setdefault(
+                                "get_weather", {}
+                            )
+                            weather_bucket[result["city"]] = result
+                        else:
+                            tool_results_this_turn[fn_name] = result
+
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": json.dumps(result, ensure_ascii=False),
+                            }
+                        )
+                    continue  # give the model its results and loop
+
+                # ── Final text response ─────────────────────────────────────
+                text = (assistant_msg.get("content") or "").strip()
+                return {
+                    "response_text": text,
+                    "lm_studio_available": True,
+                    "fallback_mode": False,
+                    "tool_results": tool_results_this_turn,
+                }
+
+        # Exhausted iterations without a final stop
         return {
-            "response_text": fallback,
+            "response_text": "I couldn't finish that in time — please try again.",
+            "lm_studio_available": True,
+            "fallback_mode": False,
+            "tool_results": tool_results_this_turn,
+        }
+
+    except Exception as exc:
+        return {
+            "response_text": (
+                "I'm having trouble connecting right now. "
+                "Please make sure LM Studio is running and try again."
+            ),
             "lm_studio_available": False,
             "fallback_mode": True,
-            "error": str(e),
+            "error": str(exc),
+            "tool_results": {},
         }
 
 
+# ─── Health check ──────────────────────────────────────────────────────────
 async def check_lm_studio() -> bool:
-    """Ping LM Studio models endpoint."""
+    """Ping the LM Studio models endpoint."""
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             r = await client.get(f"{settings.lm_studio_base_url}/models")
             return r.status_code == 200
     except Exception:
         return False
+

@@ -1,5 +1,139 @@
 import re
-from typing import Dict, Any, Optional
+import json
+from typing import Dict, Any, List, Optional
+
+# ─── OpenAI-compatible tool schemas ─────────────────────────────────────────
+# The LLM reads these schemas and decides when to call each tool.
+# Tools are NOT pre-called by the backend; the LLM drives all tool invocations.
+
+TOOL_DEFINITIONS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_order",
+            "description": (
+                "Look up the status, expected delivery time, tracking information, "
+                "and refund policy for a customer order. Call this whenever the user "
+                "mentions an order ID or asks about delivery, tracking, or a refund."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {
+                        "type": "string",
+                        "description": "The numeric order ID (e.g. '4421')",
+                    },
+                    "email": {
+                        "type": "string",
+                        "description": "Customer email for account verification (optional)",
+                    },
+                },
+                "required": ["order_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_hotels",
+            "description": (
+                "Search for available hotels in a city. Call this when the user wants "
+                "to book accommodation or asks for hotel options in a specific location."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "City name to search in (e.g. 'Bangalore')",
+                    },
+                    "budget": {
+                        "type": "number",
+                        "description": "Maximum budget per night in INR (optional)",
+                    },
+                    "people": {
+                        "type": "integer",
+                        "description": "Number of guests (optional)",
+                    },
+                },
+                "required": ["city"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": (
+                "Get the current weather conditions for a city. Call this each time "
+                "the user asks about weather in a specific city — including follow-up "
+                "questions like 'and in Delhi?' or '¿Y en Chennai?'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "Name of the city (e.g. 'Mumbai', 'Delhi', 'Chennai')",
+                    },
+                },
+                "required": ["city"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_food_order",
+            "description": (
+                "Confirm and record a food order. Call this when the user places a "
+                "food order, e.g. pizza, and specifies preferences or add-ons."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item": {
+                        "type": "string",
+                        "description": "The food item being ordered (e.g. 'pizza')",
+                    },
+                    "preference": {
+                        "type": "string",
+                        "description": "Dietary preference, e.g. 'vegetarian' (optional)",
+                    },
+                    "add_on": {
+                        "type": "string",
+                        "description": "Any add-on items, e.g. 'coke' (optional)",
+                    },
+                },
+                "required": ["item"],
+            },
+        },
+    },
+]
+
+
+def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Dispatch a tool call by name and return its result as a plain dict."""
+    if name == "lookup_order":
+        return lookup_order(
+            str(args.get("order_id", "")),
+            args.get("email"),
+        )
+    if name == "search_hotels":
+        return search_hotels(
+            str(args.get("city", "")),
+            args.get("budget"),
+            args.get("people"),
+        )
+    if name == "get_weather":
+        return get_weather(str(args.get("city", "")))
+    if name == "confirm_food_order":
+        return pizza_order_context(
+            str(args.get("item", "pizza")),
+            str(args.get("preference", "")),
+            str(args.get("add_on", "")),
+        )
+    return {"error": f"Unknown tool: {name}"}
 
 
 def lookup_order(order_id: str, email: Optional[str] = None) -> Dict[str, Any]:
@@ -194,10 +328,24 @@ def extract_entities_from_text(text: str, memory_entities: Dict[str, Any]) -> Di
     if food:
         updated["food_order"] = food
 
-    # Hotel second option recall
+    # Hotel second option recall — English and Spanish
     if updated.get("hotel_options") and not updated.get("selected_hotel_option"):
         if re.search(r"\bsecond\s+option\b|\boption\s+2\b|\b2nd\b", text_lower):
             updated["selected_hotel_option"] = 2
+        # Spanish: "segunda opción", "la segunda", "opción 2"
+        if re.search(r"\bsegunda\s+opci[oó]n\b|\bla\s+segunda\b|\bopci[oó]n\s+2\b", text_lower):
+            updated["selected_hotel_option"] = 2
+
+    # Booking confirmation — "book it", "confirm", "reservar" triggers booking_confirmed flag
+    if updated.get("selected_hotel_option") and not updated.get("booking_confirmed"):
+        if re.search(r"\bbook\s+it\b|\bconfirm\b|\breserv", text_lower):
+            updated["booking_confirmed"] = True
+
+    # Tracking / refund intent flags — used by LLM to give more specific answers
+    if re.search(r"\btrack(?:ing)?\s+link\b|\btracking\b", text_lower):
+        updated["wants_tracking_link"] = True
+    if re.search(r"\brefund\b|\bwapas\b|\bpaise\s+wapas\b", text_lower):
+        updated["wants_refund"] = True
 
     return updated
 

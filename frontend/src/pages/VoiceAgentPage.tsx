@@ -229,7 +229,7 @@ export default function VoiceAgentPage() {
       <aside
         className={`${
           sidebarOpen ? "w-64" : "w-0"
-        } transition-all duration-300 overflow-hidden flex-shrink-0 border-r border-white/[0.06] bg-black/30 flex flex-col`}
+        } transition-all duration-300 overflow-hidden flex-shrink-0 border-r border-white/[0.06] backdrop-blur-xl bg-black/20 flex flex-col`}
       >
         {/* New chat button */}
         <div className="p-3 border-b border-white/[0.06] flex-shrink-0">
@@ -378,13 +378,13 @@ export default function VoiceAgentPage() {
             {/* Message list */}
             <div className="flex-1 overflow-y-auto pr-1 min-h-0">
               {activeChat && (
-                <ConversationPanel turns={activeChat.turns} voiceGender={voiceGender} />
+                <ConversationPanel turns={activeChat.turns} voiceGender={voiceGender} thinking={loading} />
               )}
               <div ref={bottomRef} />
             </div>
 
             {/* Input area */}
-            <div className="glass p-3 mt-3 flex-shrink-0">
+            <div className="glass-card p-3 mt-3 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <div className="flex-shrink-0 text-center">
                   <MicRecorder

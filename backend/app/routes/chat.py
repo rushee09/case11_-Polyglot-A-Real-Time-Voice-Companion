@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+import os
 from app.models.schemas import (
     ChatRequest, ChatResponse, DetectLanguageRequest,
     LanguageDetectResponse, LatencyBreakdown,
 )
 from app.services.language_service import detect_language_from_text, get_language_label
 from app.services.memory_service import get_or_create_session, update_memory_after_turn, record_assistant_turn
-from app.services.scenario_tools import build_tool_context
 from app.services.llm_service import call_llm
 from app.services.latency_service import LatencyTracker, TimedBlock
 from app.services.tts_service import get_tts_metadata
@@ -27,17 +28,24 @@ async def chat(req: ChatRequest):
         session = get_or_create_session(req.session_id, req.scenario_name)
         switch_info = update_memory_after_turn(session, req.text, lang, req.scenario_name)
 
-    # 3. Tool context
-    with TimedBlock(tracker, "tool_ms"):
-        tool_ctx = build_tool_context(session.entities.to_dict(), req.scenario_name)
-
-    # 4. LLM
+    # 3. LLM — agent loop (model calls tools on demand; no pre-fetch)
     with TimedBlock(tracker, "llm_ms"):
         memory_snap = session.to_dict()
         chat_history = session.get_chat_history(max_turns=6)
         llm_result = await call_llm(
-            req.text, lang, label, memory_snap, tool_ctx, chat_history
+            req.text, lang, label, memory_snap, chat_history
         )
+
+    # Persist any tool results the agent fetched this turn into the session
+    # cache so that follow-up questions (language switches, "second option",
+    # "compare all three") work without the model re-calling tools.
+    for tool_name, result in llm_result.get("tool_results", {}).items():
+        if tool_name == "get_weather":
+            # Merge city-keyed weather dict rather than overwrite
+            weather_cache = session.tool_cache.setdefault("get_weather", {})
+            weather_cache.update(result)
+        else:
+            session.tool_cache[tool_name] = result
 
     response_text: str = llm_result["response_text"]
     # Response language = same as detected (agent mirrors user)
@@ -87,7 +95,7 @@ async def chat(req: ChatRequest):
         language_switched=switch_info.get("language_switched", False),
         previous_language=session.previous_language,
         memory_snapshot=session.to_dict(),
-        tool_context=tool_ctx or None,
+        tool_context=llm_result.get("tool_results") or None,
         latency=LatencyBreakdown(**latency_dict),
         lm_studio_available=llm_result.get("lm_studio_available", False),
         fallback_mode=llm_result.get("fallback_mode", False),
@@ -99,4 +107,17 @@ async def detect_language(req: DetectLanguageRequest):
     lang, label, confidence = detect_language_from_text(req.text)
     return LanguageDetectResponse(
         detected_language=lang, language_label=label, confidence=confidence
+    )
+
+
+@router.get("/export-csv")
+async def export_chat_csv():
+    """Download the full conversation history as a CSV file."""
+    path = storage_service.get_csv_path()
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="No chat history CSV found yet.")
+    return FileResponse(
+        path=path,
+        media_type="text/csv",
+        filename="polyglot_chat_history.csv",
     )

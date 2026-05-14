@@ -1,0 +1,99 @@
+Polyglot Voice Companion — Sample Conversation Scripts (Case 11)
+
+Sample Conversation Scripts — Polyglot Voice Companion
+
+Use these scripts to manually test your agent. Each scenario contains at least one
+language switch mid-conversation. Your agent must:
+1.	Detect the language change within 1–2 utterances.
+2.	Continue the conversation context (do NOT reset memory on switch).
+3.	Respond in the language the user just spoke.
+
+Languages used in these samples: English, Hindi, Spanish. You may adapt the
+samples to any 3 languages your chosen models support.
+
+— — —
+
+Scenario 1 — Customer Support: Order Status
+
+Turn 1 (English): "Hi, I need to check the status of my order. The order ID is 4421."
+
+*(Agent acknowledges in English, asks for verification.)*
+
+Turn 2 (English): "Yes, the email on the account is rahul@example.com."
+
+*(Agent confirms order is out for delivery, in English.)*
+
+Turn 3 (Hindi): "Theek hai, lekin delivery kal tak ho jaayegi kya?"
+*(Translation: "OK, but will the delivery happen by tomorrow?")*
+
+*(Agent must now switch to Hindi, retain order context, answer the delivery question in Hindi.)*
+
+Turn 4 (Hindi): "Aur agar nahi hua toh refund mil sakta hai?"
+*(Translation: "And if not, can I get a refund?")*
+
+*(Agent continues in Hindi.)*
+
+Turn 5 (English): "Actually let's switch back — can you email me the tracking link?"
+
+*(Agent must switch back to English, retain context.)*
+
+— — —
+
+Scenario 2 — Travel Planning: Hotel Booking
+
+Turn 1 (Spanish): "Hola, quiero reservar un hotel en Bangalore para el próximo fin de semana."
+*(Translation: "Hello, I want to book a hotel in Bangalore for next weekend.")*
+
+*(Agent responds in Spanish.)*
+
+Turn 2 (Spanish): "Para dos personas, presupuesto de 5000 rupias por noche."
+
+*(Agent suggests options in Spanish.)*
+
+Turn 3 (English): "Sorry, my Spanish is rusty. Can we continue in English? Tell me again about the second option."
+
+*(Agent switches to English, recalls "second option" from prior context.)*
+
+Turn 4 (English): "Book it. Confirm the dates please."
+
+— — —
+
+Scenario 3 — Code-Switching Within an Utterance (Stretch)
+
+Turn 1 (Mixed Hindi+English): "Mujhe ek pizza order karna hai, but make it veg only please."
+
+*(Agent should handle mixed-language gracefully — either pick the dominant language
+or respond in mixed style. Document your choice.)*
+
+Turn 2 (English): "And add a coke too."
+
+— — —
+
+Scenario 4 — Rapid Switching (Stress Test)
+
+Turn 1 (English): "What's the weather in Mumbai today?"
+
+Turn 2 (Hindi): "Aur Delhi mein?"
+*(Translation: "And in Delhi?")*
+
+Turn 3 (Spanish): "¿Y en Chennai?"
+*(Translation: "And in Chennai?")*
+
+Turn 4 (English): "Compare all three for me."
+
+*(Agent must answer the comparison in English while having understood three different
+languages in the prior turns.)*
+
+— — —
+
+Evaluation Checklist for the Panel
+
+For each scenario, the evaluator should observe:
+
+•	[ ] Did the agent detect the language switch correctly?
+•	[ ] Was the context (order ID, hotel preference, prior question) carried across the switch?
+•	[ ] What was the latency from end-of-user-speech to start-of-agent-speech? (Target: <1.2s, stretch: <800ms)
+•	[ ] Did the TTS voice match the language naturally (e.g., Hindi voice for Hindi reply)?
+•	[ ] How did the agent handle the code-switching utterance?
+•	[ ] Did the agent ever "forget" prior context after a language switch?
+

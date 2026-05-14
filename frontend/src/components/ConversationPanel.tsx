@@ -1,4 +1,5 @@
 import LanguageBadge from "./LanguageBadge";
+import ThinkingBubble from "./ThinkingBubble";
 import { speakText } from "../api/client";
 
 interface Turn {
@@ -15,12 +16,13 @@ interface Turn {
 interface Props {
   turns: Turn[];
   voiceGender?: "male" | "female";
+  thinking?: boolean;
 }
 
-export default function ConversationPanel({ turns, voiceGender = "male" }: Props) {
-  if (turns.length === 0) {
+export default function ConversationPanel({ turns, voiceGender = "male", thinking = false }: Props) {
+  if (turns.length === 0 && !thinking) {
     return (
-      <div className="glass p-8 text-center text-white/30 text-sm">
+      <div className="glass-card p-8 text-center text-white/30 text-sm">
         No conversation yet. Send a message or record your voice.
       </div>
     );
@@ -48,8 +50,8 @@ export default function ConversationPanel({ turns, voiceGender = "male" }: Props
             <div
               className={`max-w-[80%] rounded-2xl px-4 py-3 space-y-1.5 ${
                 turn.role === "user"
-                  ? "bg-violet-500/15 border border-violet-500/20"
-                  : "glass-sm"
+                  ? "bg-violet-500/15 border border-violet-500/20 backdrop-blur-sm"
+                  : "glass-card"
               }`}
             >
               {/* Header */}
@@ -84,6 +86,9 @@ export default function ConversationPanel({ turns, voiceGender = "male" }: Props
           </div>
         </div>
       ))}
+
+      {/* Thinking animation while LLM processes */}
+      {thinking && <ThinkingBubble />}
     </div>
   );
 }

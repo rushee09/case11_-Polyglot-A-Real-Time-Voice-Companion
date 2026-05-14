@@ -1,6 +1,8 @@
 """
 Storage service — Supabase Postgres primary, local JSON fallback.
+Also writes a CSV file for every conversation message for easy export.
 """
+import csv
 import json
 import os
 import uuid
@@ -16,6 +18,11 @@ def _local_path(table: str) -> str:
     return os.path.join(_LOCAL_DIR, f"{table}.json")
 
 
+def _csv_path(table: str) -> str:
+    os.makedirs(_LOCAL_DIR, exist_ok=True)
+    return os.path.join(_LOCAL_DIR, f"{table}.csv")
+
+
 def _local_read(table: str) -> List[Dict[str, Any]]:
     path = _local_path(table)
     if not os.path.exists(path):
@@ -29,6 +36,29 @@ def _local_append(table: str, record: Dict[str, Any]) -> None:
     rows.append(record)
     with open(_local_path(table), "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)
+
+
+_CSV_CHAT_COLS = [
+    "id", "session_id", "turn_number", "role",
+    "transcript", "detected_language", "response_language",
+    "response_text", "latency_ms", "created_at",
+]
+
+
+def _csv_append_message(record: Dict[str, Any]) -> None:
+    """Append one conversation row to the CSV chat history file."""
+    path = _csv_path("chat_history")
+    write_header = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=_CSV_CHAT_COLS, extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow({k: record.get(k, "") for k in _CSV_CHAT_COLS})
+
+
+def get_csv_path() -> str:
+    """Return absolute path to the chat history CSV file."""
+    return os.path.abspath(_csv_path("chat_history"))
 
 
 # ─── Supabase helpers ────────────────────────────────────────────────────────
@@ -109,10 +139,12 @@ def log_message(
             sb = _get_supabase()
             if sb:
                 sb.table("conversation_messages").insert(record).execute()
+                _csv_append_message(record)
                 return
         except Exception as e:
             print(f"[storage] Supabase error: {e}")
     _local_append("conversation_messages", record)
+    _csv_append_message(record)
 
 
 def log_language_switch(

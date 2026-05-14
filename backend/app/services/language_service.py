@@ -15,8 +15,13 @@ SPANISH_KEYWORDS = {
     "rupias", "noche", "hotel", "hablar", "gracias", "por", "favor",
     "también", "opciones", "confirmar", "fechas", "cuánto", "dónde",
     "cómo", "qué", "está", "son", "pueden", "segunda", "segunda",
-    "opción", "sí", "no", "mi", "español", "rusty",
+    "opción", "sí", "mi", "español",
     "continúa", "reserva",
+    # Scenario 2 travel phrases
+    "próximo", "fin", "semana", "weekend", "dos", "quiero", "siguiente",
+    "reservar", "habitación", "viaje", "vuelo", "precio",
+    # Scenario 4 weather
+    "clima", "tiempo", "temperatura", "hoy", "mañana",
 }
 
 HINDI_KEYWORDS = {
@@ -38,9 +43,12 @@ HINDI_KEYWORDS = {
 
 ENGLISH_STRONG_INDICATORS = {
     "the", "is", "are", "was", "were", "have", "has", "will", "would",
-    "can", "could", "should", "would", "hello", "hi", "yes", "no",
+    "can", "could", "should", "hello", "hi", "yes",
     "please", "thank", "what", "where", "when", "how", "need", "want",
     "check", "status", "order", "email", "booking", "hotel", "weather",
+    # Switch-back phrases (Scenario 1 Turn 5, Scenario 2 Turn 3)
+    "sorry", "actually", "continue", "switch", "let", "tell", "again",
+    "compare", "book", "confirm", "all", "three", "both",
 }
 
 

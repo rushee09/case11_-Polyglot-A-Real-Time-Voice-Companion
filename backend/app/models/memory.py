@@ -14,8 +14,11 @@ class MemoryEntities:
     hotel_people: Optional[int] = None
     hotel_options: List[Dict[str, Any]] = field(default_factory=list)
     selected_hotel_option: Optional[int] = None
+    booking_confirmed: bool = False
     weather_cities: List[str] = field(default_factory=list)
     food_order: Dict[str, Any] = field(default_factory=dict)
+    wants_tracking_link: bool = False
+    wants_refund: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -28,8 +31,11 @@ class MemoryEntities:
             "hotel_people": self.hotel_people,
             "hotel_options": self.hotel_options,
             "selected_hotel_option": self.selected_hotel_option,
+            "booking_confirmed": self.booking_confirmed,
             "weather_cities": self.weather_cities,
             "food_order": self.food_order,
+            "wants_tracking_link": self.wants_tracking_link,
+            "wants_refund": self.wants_refund,
         }
 
     @classmethod
@@ -44,8 +50,11 @@ class MemoryEntities:
             hotel_people=d.get("hotel_people"),
             hotel_options=d.get("hotel_options", []),
             selected_hotel_option=d.get("selected_hotel_option"),
+            booking_confirmed=d.get("booking_confirmed", False),
             weather_cities=d.get("weather_cities", []),
             food_order=d.get("food_order", {}),
+            wants_tracking_link=d.get("wants_tracking_link", False),
+            wants_refund=d.get("wants_refund", False),
         )
 
 
@@ -79,6 +88,9 @@ class SessionMemory:
     entities: MemoryEntities = field(default_factory=MemoryEntities)
     conversation_summary: str = ""
     turns: List[ConversationTurn] = field(default_factory=list)
+    # Accumulates tool call results across turns so the LLM never needs to
+    # call the same tool twice for information it already retrieved.
+    tool_cache: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
@@ -91,6 +103,7 @@ class SessionMemory:
             "entities": self.entities.to_dict(),
             "conversation_summary": self.conversation_summary,
             "turns": [t.to_dict() for t in self.turns],
+            "tool_cache": self.tool_cache,
             "created_at": self.created_at,
         }
 
