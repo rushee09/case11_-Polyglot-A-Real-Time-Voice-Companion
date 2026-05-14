@@ -80,7 +80,7 @@ function AppRoutes() {
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
           <Route path="/" element={<RequireAuth><LandingPage /></RequireAuth>} />
-          <Route path="/agent" element={<RequireAuth><VoiceAgentPage /></RequireAuth>} />
+          <Route path="/agent" element={<RequireAuth><VoiceAgentPage key={user?.username} /></RequireAuth>} />
           <Route path="/scenarios" element={<RequireAuth><ScenarioTestPage /></RequireAuth>} />
           <Route path="/logs" element={<RequireAuth><LogsPage /></RequireAuth>} />
         </Routes>

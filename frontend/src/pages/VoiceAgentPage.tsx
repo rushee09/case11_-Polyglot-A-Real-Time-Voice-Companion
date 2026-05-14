@@ -12,6 +12,8 @@ import MemoryPanel from "../components/MemoryPanel";
 import LatencyPanel from "../components/LatencyPanel";
 import LanguageBadge from "../components/LanguageBadge";
 import StatusTimeline from "../components/StatusTimeline";
+import { useAuth } from "../context/AuthContext";
+import { getUserChatsKey } from "../context/AuthContext";
 
 interface ConvTurn {
   role: "user" | "assistant";
@@ -22,6 +24,13 @@ interface ConvTurn {
   previous_language?: string;
   latency_ms?: number;
   turn_number?: number;
+}
+
+interface LangSwitchEvent {
+  turn_number: number;
+  from_lang: string;
+  to_lang: string;
+  timestamp: string;
 }
 
 interface Chat {
@@ -36,6 +45,7 @@ interface Chat {
   lastFallback: boolean;
   detectedLang: string;
   createdAt: number;
+  languageSwitches: LangSwitchEvent[];
 }
 
 type PipelineStage = "idle" | "recording_received" | "transcribing" | "language_detected" | "updating_memory" | "calling_llm" | "response_ready";
@@ -67,15 +77,32 @@ function createNewChat(): Chat {
     lastFallback: false,
     detectedLang: "en",
     createdAt: Date.now(),
+    languageSwitches: [],
   };
 }
 
 export default function VoiceAgentPage() {
+  const { user } = useAuth();
+  const chatsKey = getUserChatsKey(user?.username ?? "guest");
+
   const [chats, setChats] = useState<Chat[]>(() => {
-    const initial = createNewChat();
-    return [initial];
+    try {
+      const raw = localStorage.getItem(getUserChatsKey(user?.username ?? "guest"));
+      if (raw) {
+        const saved = JSON.parse(raw) as Chat[];
+        if (Array.isArray(saved) && saved.length > 0) return saved;
+      }
+    } catch { /* ignore */ }
+    return [createNewChat()];
   });
   const [activeChatId, setActiveChatId] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem(getUserChatsKey(user?.username ?? "guest"));
+      if (raw) {
+        const saved = JSON.parse(raw) as Chat[];
+        if (Array.isArray(saved) && saved.length > 0) return saved[0].id;
+      }
+    } catch { /* ignore */ }
     const initial = createNewChat();
     return initial.id;
   });
@@ -88,14 +115,15 @@ export default function VoiceAgentPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Sync activeChatId to the initial chat
-    setActiveChatId(chats[0].id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
     apiHealth().then(setHealth).catch(() => null);
   }, []);
+
+  // Persist chats to localStorage whenever they change (per user)
+  useEffect(() => {
+    try {
+      localStorage.setItem(chatsKey, JSON.stringify(chats));
+    } catch { /* quota exceeded — ignore */ }
+  }, [chats, chatsKey]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -163,6 +191,20 @@ export default function VoiceAgentPage() {
         chat.turns.length === 0
           ? userText.slice(0, 42) + (userText.length > 42 ? "…" : "")
           : chat.title;
+
+      // Track language switch for this turn
+      const updatedSwitches = resp.language_switched && resp.previous_language
+        ? [
+            ...chat.languageSwitches,
+            {
+              turn_number: resp.turn_number,
+              from_lang: resp.previous_language,
+              to_lang: resp.detected_language,
+              timestamp: new Date().toISOString(),
+            } satisfies LangSwitchEvent,
+          ]
+        : chat.languageSwitches;
+
       return {
         turns: updatedTurns,
         title,
@@ -171,6 +213,7 @@ export default function VoiceAgentPage() {
         lastLmAvailable: resp.lm_studio_available,
         lastFallback: resp.fallback_mode,
         detectedLang: resp.detected_language,
+        languageSwitches: updatedSwitches,
       };
     });
 
@@ -231,8 +274,15 @@ export default function VoiceAgentPage() {
           sidebarOpen ? "w-64" : "w-0"
         } transition-all duration-300 overflow-hidden flex-shrink-0 border-r border-white/[0.06] backdrop-blur-xl bg-black/20 flex flex-col`}
       >
-        {/* New chat button */}
-        <div className="p-3 border-b border-white/[0.06] flex-shrink-0">
+        {/* User info + new chat button */}
+        <div className="p-3 border-b border-white/[0.06] flex-shrink-0 space-y-2">
+          {/* Logged-in user pill */}
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20">
+            <div className="w-6 h-6 rounded-full bg-violet-500/30 flex items-center justify-center text-xs font-bold text-violet-300 uppercase flex-shrink-0">
+              {user?.username?.[0] ?? "?"}
+            </div>
+            <span className="text-xs font-medium text-violet-300 truncate">{user?.username}</span>
+          </div>
           <button
             onClick={newChat}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 hover:bg-white/5 text-sm text-white/60 hover:text-white transition-colors"
@@ -270,6 +320,12 @@ export default function VoiceAgentPage() {
                 />
               </svg>
               <span className="text-xs truncate flex-1 leading-relaxed">{chat.title}</span>
+              {/* Language switch badge */}
+              {chat.languageSwitches.length > 0 && (
+                <span className="flex-shrink-0 text-[9px] font-bold bg-yellow-500/15 text-yellow-400 border border-yellow-500/25 rounded px-1 py-0.5">
+                  {chat.languageSwitches.length}🔀
+                </span>
+              )}
               {chats.length > 1 && (
                 <button
                   onClick={(e) => deleteChat(chat.id, e)}
@@ -282,6 +338,31 @@ export default function VoiceAgentPage() {
               )}
             </div>
           ))}
+        </div>
+
+        {/* Language switch log for active chat */}
+        <div className="px-3 py-2.5 border-t border-white/[0.06] flex-shrink-0">
+          <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5 px-1 flex items-center gap-1">
+            Lang Switches
+            {activeChat?.languageSwitches.length > 0 && (
+              <span className="ml-auto text-yellow-400 font-bold">{activeChat.languageSwitches.length}</span>
+            )}
+          </p>
+          {!activeChat || activeChat.languageSwitches.length === 0 ? (
+            <p className="text-[10px] text-white/20 px-1">No switches in this chat</p>
+          ) : (
+            <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+              {activeChat.languageSwitches.map((sw, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-[10px] px-1 py-0.5 rounded bg-white/[0.03]">
+                  <span className="font-mono text-white/25">#{sw.turn_number}</span>
+                  <LanguageBadge language={sw.from_lang} size="sm" />
+                  <span className="text-white/25">→</span>
+                  <LanguageBadge language={sw.to_lang} size="sm" />
+                  <span className="ml-auto text-white/20 font-mono">{new Date(sw.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Voice gender selector */}

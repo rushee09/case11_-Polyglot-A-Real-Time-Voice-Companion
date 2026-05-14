@@ -14,28 +14,42 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const SESSION_KEY = "polyglot_auth";
-const USERS_KEY   = "polyglot_users"; // { [username]: password }
+const USERS_KEY   = "polyglot_users"; // { [username]: hashedPassword }
+
+// ── Default users seeded on first load ──────────────────────────────────────
+const DEFAULT_USERS: Record<string, string> = {
+  admin: "polyglot123",
+  alice: "alice123",
+  bob:   "bob123",
+};
 
 // ── User registry helpers ────────────────────────────────────────────────────
 
 function loadUsers(): Record<string, string> {
   try {
     const raw = localStorage.getItem(USERS_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    // Seed a default admin if the registry is empty
-    if (Object.keys(parsed).length === 0) {
-      const seed = { admin: "polyglot123" };
-      localStorage.setItem(USERS_KEY, JSON.stringify(seed));
-      return seed;
+    const parsed: Record<string, string> = raw ? JSON.parse(raw) : {};
+    // Always ensure default users exist (handles first-run and migrations)
+    let changed = Object.keys(parsed).length === 0;
+    for (const [k, v] of Object.entries(DEFAULT_USERS)) {
+      if (!parsed[k]) { parsed[k] = v; changed = true; }
     }
+    if (changed) localStorage.setItem(USERS_KEY, JSON.stringify(parsed));
     return parsed;
   } catch {
-    return { admin: "polyglot123" };
+    localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
+    return { ...DEFAULT_USERS };
   }
 }
 
 function saveUsers(users: Record<string, string>) {
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
+}
+
+// ── Per-user data helpers (exported for use in other components) ─────────────
+
+export function getUserChatsKey(username: string): string {
+  return `polyglot_chats_${username}`;
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
