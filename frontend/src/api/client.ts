@@ -145,6 +145,59 @@ export function createWebSocket(sessionId: string): WebSocket {
   return new WebSocket(`${getWsBase()}/ws/session/${sessionId}`);
 }
 
+const maleKeywords = [
+  "male", "david", "mark", "richard", "james", "guy", "daniel",
+  "alex", "tom", "george", "ryan", "fred", "ralph", "bruce",
+  "diego", "jorge", "rishi", "carlos", "miguel", "hendrik",
+];
+const femaleKeywords = [
+  "female", "samantha", "victoria", "karen", "moira", "tessa",
+  "fiona", "kate", "alice", "anna", "susan", "zira", "hazel",
+  "amelie", "paulina", "lekha", "veena", "monica", "lucia",
+];
+
+const langMap: Record<string, string> = {
+  en: "en-US",
+  hi: "hi-IN",
+  es: "es-ES",
+  mixed: "hi-IN",
+  unknown: "en-US",
+};
+
+/**
+ * Pick the best matching voice for the given language + gender.
+ * Uses name-keyword matching first; falls back to pitch when no
+ * gender-specific voice is available for that language.
+ */
+function pickVoice(
+  voices: SpeechSynthesisVoice[],
+  targetLang: string,
+  voiceGender: "male" | "female"
+): SpeechSynthesisVoice | undefined {
+  const langCode = targetLang.split("-")[0].toLowerCase();
+
+  // Prefer exact locale match (e.g. "hi-IN"), then language prefix (e.g. "hi")
+  const exact = voices.filter((v) => v.lang.toLowerCase() === targetLang.toLowerCase());
+  const prefix = voices.filter((v) => v.lang.toLowerCase().startsWith(langCode));
+  const langVoices = exact.length > 0 ? exact : prefix;
+  if (langVoices.length === 0) return undefined;
+
+  const keywords = voiceGender === "male" ? maleKeywords : femaleKeywords;
+  const oppositeKeywords = voiceGender === "male" ? femaleKeywords : maleKeywords;
+
+  // 1. Keyword match for desired gender
+  const keywordMatch = langVoices.find((v) =>
+    keywords.some((k) => v.name.toLowerCase().includes(k))
+  );
+  if (keywordMatch) return keywordMatch;
+
+  // 2. Avoid voices that clearly match the opposite gender
+  const nonOpposite = langVoices.filter(
+    (v) => !oppositeKeywords.some((k) => v.name.toLowerCase().includes(k))
+  );
+  return nonOpposite[0] ?? langVoices[0];
+}
+
 export function speakText(
   text: string,
   lang: string,
@@ -152,48 +205,31 @@ export function speakText(
 ) {
   if (!window.speechSynthesis) return;
   window.speechSynthesis.cancel();
-  const langMap: Record<string, string> = {
-    en: "en-US",
-    hi: "hi-IN",
-    es: "es-ES",
-    mixed: "hi-IN",
-    unknown: "en-US",
-  };
+
   const targetLang = langMap[lang] ?? "en-US";
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.lang = targetLang;
-  utt.rate = 1.0;
 
-  const voices = window.speechSynthesis.getVoices();
-  const langCode = targetLang.split("-")[0].toLowerCase();
-  const langVoices = voices.filter((v) =>
-    v.lang.toLowerCase().startsWith(langCode)
-  );
+  function doSpeak() {
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = targetLang;
+    utt.rate = 0.95;
+    // Pitch is the most reliable gender enforcer when no named voice matches
+    utt.pitch = voiceGender === "male" ? 0.8 : 1.15;
 
-  const maleKeywords = [
-    "male", "david", "mark", "richard", "james", "guy", "daniel",
-    "alex", "tom", "george", "ryan", "fred", "ralph", "bruce",
-    "diego", "jorge", "rishi",
-  ];
-  const femaleKeywords = [
-    "female", "samantha", "victoria", "karen", "moira", "tessa",
-    "fiona", "kate", "alice", "anna", "susan", "zira", "hazel",
-    "amelie", "paulina", "lekha", "veena",
-  ];
+    const voices = window.speechSynthesis.getVoices();
+    const voice = pickVoice(voices, targetLang, voiceGender);
+    if (voice) utt.voice = voice;
 
-  const keywords = voiceGender === "male" ? maleKeywords : femaleKeywords;
-  let selectedVoice = langVoices.find((v) =>
-    keywords.some((k) => v.name.toLowerCase().includes(k))
-  );
-
-  if (!selectedVoice && langVoices.length > 0) {
-    // Fallback: second voice for male (often male-pitched), first for female
-    selectedVoice =
-      voiceGender === "male" && langVoices.length > 1
-        ? langVoices[1]
-        : langVoices[0];
+    window.speechSynthesis.speak(utt);
   }
 
-  if (selectedVoice) utt.voice = selectedVoice;
-  window.speechSynthesis.speak(utt);
+  // Browser loads voices asynchronously — wait if not ready yet
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length > 0) {
+    doSpeak();
+  } else {
+    window.speechSynthesis.onvoiceschanged = () => {
+      window.speechSynthesis.onvoiceschanged = null;
+      doSpeak();
+    };
+  }
 }

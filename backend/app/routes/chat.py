@@ -11,6 +11,7 @@ from app.services.llm_service import call_llm
 from app.services.latency_service import LatencyTracker, TimedBlock
 from app.services.tts_service import get_tts_metadata
 from app.services import storage_service
+from app.services.guardrail_service import check_input, BLOCKED_RESPONSE
 
 router = APIRouter(prefix="/api")
 
@@ -18,6 +19,11 @@ router = APIRouter(prefix="/api")
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     tracker = LatencyTracker()
+
+    # 0. Guardrail — reject prompt injection / jailbreak attempts
+    guard = check_input(req.text)
+    if guard.blocked:
+        raise HTTPException(status_code=400, detail=BLOCKED_RESPONSE)
 
     # 1. Language detection
     with TimedBlock(tracker, "language_detection_ms"):

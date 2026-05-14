@@ -459,7 +459,7 @@ export default function VoiceAgentPage() {
             {/* Message list */}
             <div className="flex-1 overflow-y-auto pr-1 min-h-0">
               {activeChat && (
-                <ConversationPanel turns={activeChat.turns} voiceGender={voiceGender} thinking={loading} />
+                <ConversationPanel turns={activeChat.turns} voiceGender={voiceGender} thinking={loading} userName={user?.username} />
               )}
               <div ref={bottomRef} />
             </div>

@@ -10,6 +10,7 @@ from app.services.llm_service import call_llm
 from app.services.latency_service import LatencyTracker, TimedBlock
 from app.services.tts_service import get_tts_metadata
 from app.services import storage_service
+from app.services.guardrail_service import check_input, BLOCKED_RESPONSE
 
 router = APIRouter(prefix="/api")
 
@@ -79,6 +80,11 @@ async def voice_turn(
             )
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e))
+
+    # 2b. Guardrail — scan transcript for injection / jailbreak attempts
+    guard = check_input(transcript)
+    if guard.blocked:
+        raise HTTPException(status_code=400, detail=BLOCKED_RESPONSE)
 
     # 3. Language detection (use ASR lang, refine with text rules)
     with TimedBlock(tracker, "language_detection_ms"):

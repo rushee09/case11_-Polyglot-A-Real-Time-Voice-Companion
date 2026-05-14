@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List, Dict, Any
 
 
@@ -8,6 +8,16 @@ class ChatRequest(BaseModel):
     text: str
     session_id: str
     scenario_name: Optional[str] = None
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_empty_or_huge(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("text must not be empty")
+        if len(v) > 2_000:
+            raise ValueError("text exceeds maximum allowed length (2000 chars)")
+        return v
 
 
 class DetectLanguageRequest(BaseModel):

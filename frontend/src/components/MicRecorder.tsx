@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 // Extend Window to include webkit-prefixed Speech Recognition
 declare global {
@@ -24,9 +24,28 @@ export default function MicRecorder({
   disabled,
 }: Props) {
   const [recording, setRecording] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const srRef = useRef<SpeechRecognition | null>(null);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Grace-period duration in seconds
+  const STOP_GRACE_SEC = 2.5;
+
+  function clearStopTimer() {
+    if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    stopTimerRef.current = null;
+    countdownIntervalRef.current = null;
+    setStopping(false);
+    setCountdown(0);
+  }
+
+  // Clean up timers on unmount
+  useEffect(() => () => clearStopTimer(), []);
 
   // ── Browser Speech Recognition fallback ──────────────────────────────────
   function startBrowserSR() {
@@ -64,6 +83,36 @@ export default function MicRecorder({
     setRecording(false);
   }
 
+  function commitStop() {
+    clearStopTimer();
+    if (srRef.current) {
+      stopBrowserSR();
+    } else {
+      mediaRef.current?.stop();
+      setRecording(false);
+    }
+  }
+
+  function scheduleStop() {
+    setStopping(true);
+    setCountdown(Math.ceil(STOP_GRACE_SEC));
+
+    // Tick countdown every second
+    countdownIntervalRef.current = setInterval(() => {
+      setCountdown((c) => {
+        const next = c - 1;
+        return next > 0 ? next : 0;
+      });
+    }, 1000);
+
+    stopTimerRef.current = setTimeout(commitStop, STOP_GRACE_SEC * 1000);
+  }
+
+  function cancelStop() {
+    clearStopTimer();
+    // User is still speaking — keep recording normally
+  }
+
   // ── MediaRecorder path (backend Whisper) ─────────────────────────────────
   async function startRecording() {
     if (!navigator.mediaDevices) {
@@ -90,19 +139,20 @@ export default function MicRecorder({
     }
   }
 
-  function stopRecording() {
-    mediaRef.current?.stop();
-    setRecording(false);
-  }
-
   // ── Routing ───────────────────────────────────────────────────────────────
   const useBrowserSR = !asrAvailable;
 
   function handleClick() {
-    if (recording) {
-      useBrowserSR ? stopBrowserSR() : stopRecording();
-    } else {
+    if (!recording) {
+      // Start fresh
+      clearStopTimer();
       useBrowserSR ? startBrowserSR() : startRecording();
+    } else if (stopping) {
+      // User clicked again during grace period → cancel stop, keep recording
+      cancelStop();
+    } else {
+      // First click to stop → begin grace period
+      scheduleStop();
     }
   }
 
@@ -114,13 +164,23 @@ export default function MicRecorder({
         onClick={handleClick}
         className={`relative w-16 h-16 rounded-full flex items-center justify-center transition-all
           disabled:opacity-40 disabled:cursor-not-allowed ${
-            recording
+            stopping
+              ? "bg-amber-500 animate-pulse"
+              : recording
               ? "bg-red-500 recording-pulse"
               : "bg-violet-500 hover:bg-violet-400 active:scale-95"
           }`}
-        title={recording ? "Stop recording" : "Start recording"}
+        title={
+          stopping
+            ? `Stopping in ${countdown}s — tap to keep recording`
+            : recording
+            ? "Stop recording"
+            : "Start recording"
+        }
       >
-        {recording ? (
+        {stopping ? (
+          <span className="text-white font-bold text-lg leading-none">{countdown}</span>
+        ) : recording ? (
           <span className="w-5 h-5 rounded bg-white" />
         ) : (
           <svg className="w-7 h-7 text-black" fill="currentColor" viewBox="0 0 24 24">
@@ -128,7 +188,12 @@ export default function MicRecorder({
           </svg>
         )}
       </button>
-      {useBrowserSR && (
+      {stopping && (
+        <span className="text-[9px] text-amber-300/80 font-mono text-center leading-tight">
+          tap to keep
+        </span>
+      )}
+      {useBrowserSR && !stopping && (
         <span className="text-[9px] text-amber-400/70 font-mono">browser SR</span>
       )}
     </div>
