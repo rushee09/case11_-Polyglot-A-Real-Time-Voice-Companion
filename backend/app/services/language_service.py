@@ -1,70 +1,71 @@
-import re
-from typing import Tuple, Optional
+"""
+language_service.py — Dynamic language detection
 
-LANGUAGE_LABELS = {
-    "en": "English",
-    "hi": "Hindi",
-    "es": "Spanish",
-    "mixed": "Mixed Hindi-English",
+Detection strategy (in priority order):
+  1. Explicit language-switch instruction  ("speak in Hindi", "en español", etc.)
+  2. Romanized Hindi grammar markers       (langdetect cannot detect Latin-script Hindi)
+  3. Spanish punctuation ¿ ¡              (unambiguous signal for very short texts)
+  4. langdetect library                   (handles 55+ languages via native script)
+  5. Fallback: English
+
+No hardcoded vocabulary or scenario-specific keywords.
+Language support is limited only by what langdetect can identify.
+"""
+
+import re
+import logging
+from typing import Tuple, Optional
+from langdetect import detect_langs, DetectorFactory, LangDetectException
+
+DetectorFactory.seed = 42  # reproducible results across requests
+
+logger = logging.getLogger(__name__)
+
+
+# ─── ISO 639-1 → Display label ───────────────────────────────────────────────
+# Full set of ISO codes langdetect may return, plus special internal codes.
+
+_ISO_LABELS: dict[str, str] = {
+    "af": "Afrikaans", "ar": "Arabic", "bg": "Bulgarian", "bn": "Bengali",
+    "ca": "Catalan", "cs": "Czech", "cy": "Welsh", "da": "Danish",
+    "de": "German", "el": "Greek", "en": "English", "es": "Spanish",
+    "et": "Estonian", "fa": "Persian", "fi": "Finnish", "fr": "French",
+    "gu": "Gujarati", "he": "Hebrew", "hi": "Hindi", "hr": "Croatian",
+    "hu": "Hungarian", "id": "Indonesian", "it": "Italian", "ja": "Japanese",
+    "kn": "Kannada", "ko": "Korean", "lt": "Lithuanian", "lv": "Latvian",
+    "mk": "Macedonian", "ml": "Malayalam", "mr": "Marathi", "ne": "Nepali",
+    "nl": "Dutch", "no": "Norwegian", "pa": "Punjabi", "pl": "Polish",
+    "pt": "Portuguese", "ro": "Romanian", "ru": "Russian", "sk": "Slovak",
+    "sl": "Slovenian", "sq": "Albanian", "sr": "Serbian", "sv": "Swedish",
+    "sw": "Swahili", "ta": "Tamil", "te": "Telugu", "th": "Thai",
+    "tl": "Filipino", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu",
+    "vi": "Vietnamese", "zh-cn": "Chinese (Simplified)",
+    "zh-tw": "Chinese (Traditional)",
+    "mixed": "Mixed Languages",
     "unknown": "Unknown",
 }
 
-# Rule-based keyword sets
-SPANISH_KEYWORDS = {
-    "hola", "quiero", "reservar", "para", "personas", "presupuesto",
-    "rupias", "noche", "hotel", "hablar", "gracias", "por", "favor",
-    "también", "opciones", "confirmar", "fechas", "cuánto", "dónde",
-    "cómo", "qué", "está", "son", "pueden", "segunda", "segunda",
-    "opción", "sí", "mi", "español",
-    "continúa", "reserva",
-    # Scenario 2 travel phrases
-    "próximo", "fin", "semana", "weekend", "dos", "quiero", "siguiente",
-    "reservar", "habitación", "viaje", "vuelo", "precio",
-    # Scenario 4 weather
-    "clima", "tiempo", "temperatura", "hoy", "mañana",
-}
 
-HINDI_KEYWORDS = {
-    "theek", "lekin", "kal", "tak", "jaayegi", "kya", "aur", "agar",
-    "nahi", "mil", "sakta", "mujhe", "karna", "hai", "hoga", "mere",
-    "mera", "yeh", "woh", "toh", "bhi", "sab", "karo", "chahiye",
-    "jaldi", "bahut", "accha", "acha", "paisa", "ho", "se", "ke", "ka",
-    "ki", "nahin", "refund", "delivery", "order", "please", "pizza",
-    "veg", "aaj", "kal",
-    # common connectors / pronouns / verbs missed before
-    "mein", "tum", "aap", "main", "hum", "unhe", "usse", "unka",
-    "kaise", "kaisa", "kaisi", "jawab", "hindi", "bolo", "boliye",
-    "batao", "bataiye", "dijiye", "do", "suniye", "samajh", "samajhiye",
-    "bolna", "chahta", "chahti", "likhiye", "likhna", "padhiye",
-    "hain", "tha", "thi", "the", "raha", "rahi", "rahe",
-    "hay", "hua", "huye", "naam", "kuch", "koi", "sab", "sabhi",
-    "pyar", "desh", "bharat", "duniya", "log", "ghar", "kaam",
-}
-
-ENGLISH_STRONG_INDICATORS = {
-    "the", "is", "are", "was", "were", "have", "has", "will", "would",
-    "can", "could", "should", "hello", "hi", "yes",
-    "please", "thank", "what", "where", "when", "how", "need", "want",
-    "check", "status", "order", "email", "booking", "hotel", "weather",
-    # Switch-back phrases (Scenario 1 Turn 5, Scenario 2 Turn 3)
-    "sorry", "actually", "continue", "switch", "let", "tell", "again",
-    "compare", "book", "confirm", "all", "three", "both",
-}
+def get_language_label(code: str) -> str:
+    """Return a human-readable label for an ISO 639-1 / BCP-47 language code."""
+    return _ISO_LABELS.get(code, code.upper())
 
 
-# Explicit language-switch instruction patterns.
-# These override keyword scoring so "jawab Hindi mein dijiye" is never
-# mis-classified as English.
-_EXPLICIT_LANG_PATTERNS = [
-    # Hindi instruction patterns
-    (re.compile(r"\b(hindi|hindustani)\s*(mein|main|me|m)\b", re.I), "hi"),
+# ─── Explicit language-switch instruction patterns ───────────────────────────
+# Universal meta-instructions the user can give in any conversation topic.
+# These ALWAYS override the detection result.
+
+_EXPLICIT_LANG_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Hindi / Hindustani
+    (re.compile(r"\b(speak|respond|answer|reply|write|continue)\s+in\s+(hindi|hindustani)\b", re.I), "hi"),
+    (re.compile(r"\b(hindi|hindustani)\s*(mein|main|me)\b", re.I), "hi"),
     (re.compile(r"\b(jawab|reply|ans|answer|bolo|boliye|batao|bataiye)\s+.{0,20}\b(hindi|hindustani)\b", re.I), "hi"),
-    (re.compile(r"\b(speak|respond|answer|reply|write)\s+in\s+hindi\b", re.I), "hi"),
-    # English instruction patterns
-    (re.compile(r"\b(speak|respond|answer|reply|write)\s+in\s+english\b", re.I), "en"),
-    (re.compile(r"\bin\s+english\s+(please|boliye|dijiye|karo)?\b", re.I), "en"),
-    # Spanish instruction patterns
-    (re.compile(r"\b(habla|responde|contesta|escribe)\s+en\s+espa[nñ]ol\b", re.I), "es"),
+    # English
+    (re.compile(r"\b(speak|respond|answer|reply|write|continue)\s+in\s+english\b", re.I), "en"),
+    (re.compile(r"\bswitch(\s+back)?\s+to\s+english\b", re.I), "en"),
+    (re.compile(r"\bin\s+english\b", re.I), "en"),
+    # Spanish
+    (re.compile(r"\b(habla|responde|contesta|escribe|continúa)\s+en\s+espa[nñ]ol\b", re.I), "es"),
     (re.compile(r"\ben\s+espa[nñ]ol\b", re.I), "es"),
 ]
 
@@ -77,64 +78,105 @@ def _check_explicit_language_instruction(text: str) -> Optional[str]:
     return None
 
 
-def _tokenize(text: str) -> list[str]:
-    text = text.lower()
-    # Keep special Spanish chars
-    text = re.sub(r"[^\w\s¿¡áéíóúüñ]", " ", text)
-    return text.split()
+# ─── Romanized Hindi grammar markers ─────────────────────────────────────────
+# langdetect treats Latin-script Hindi (Romanized / Hinglish) as English because
+# it contains no Devanagari characters.  This set contains high-frequency,
+# unambiguous Hindi GRAMMAR words — not vocabulary tied to any topic or scenario.
+
+_ROMAN_HINDI: frozenset[str] = frozenset({
+    # Copulas / auxiliaries
+    "hai", "hain", "tha", "thi", "the", "ho", "hoga", "hogi", "hoge",
+    "hua", "hui", "hue",
+    # Negation
+    "nahi", "nahin", "mat", "na",
+    # Interrogatives
+    "kya", "kaise", "kaisa", "kaisi", "kaun", "kab", "kahan", "kyun", "kyunki",
+    # Conjunctions / discourse markers
+    "aur", "lekin", "magar", "toh", "bhi", "par", "agar", "tab", "phir",
+    # Personal pronouns
+    "mujhe", "mera", "meri", "mere",
+    "tum", "tumhe", "tumhara",
+    "aap", "aapko", "aapka",
+    "main", "hum", "unhe", "usse", "unka", "iska", "uska",
+    # Common verb roots (domain-neutral)
+    "karo", "karna", "karta", "karti", "karte",
+    "chahiye", "chahta", "chahti", "chahte",
+    "batao", "bolo", "boliye", "suniye",
+    "milega", "milegi", "sakta", "sakti", "sakte",
+    "jaana", "jaayega", "jaayegi",
+    # Adverbs / adjectives
+    "theek", "accha", "acha", "bahut", "jaldi", "abhi",
+    "kal", "aaj",
+    # Discourse particles
+    "bas", "sirf", "sab", "kuch", "koi", "sabhi",
+})
 
 
-def detect_language_from_text(text: str) -> Tuple[str, str, Optional[float]]:
+def _romanized_hindi_score(tokens: list[str], total: int) -> float:
+    return sum(1 for t in tokens if t in _ROMAN_HINDI) / total
+
+
+# ─── Main detection ──────────────────────────────────────────────────────────
+
+def detect_language_from_text(text: str) -> Tuple[str, str, Optional[float], str]:
     """
-    Rule-based language detection.
-    Returns (language_code, label, confidence).
+    Detect the language of user input.
+
+    Returns:
+        (language_code, label, confidence, respond_language)
+
+    respond_language is the code the LLM should reply in:
+      - Matches language_code for unambiguous input.
+      - For "mixed" (Hinglish): the dominant language ("hi" or "en").
     """
-    # Check for explicit language-switch instruction first — highest priority
+    # 1. Explicit language-switch instruction — always wins
     explicit = _check_explicit_language_instruction(text)
     if explicit:
-        return explicit, LANGUAGE_LABELS[explicit], 1.0
+        return explicit, get_language_label(explicit), 1.0, explicit
 
-    tokens = _tokenize(text)
-    token_set = set(tokens)
+    # Tokenise (preserve accented chars so langdetect sees them)
+    tokens = re.sub(r"[^\w\s¿¡áéíóúüñ]", " ", text.lower()).split()
+    total = max(len(tokens), 1)
+    hi_score = _romanized_hindi_score(tokens, total)
 
-    # Check for Spanish-specific punctuation
+    # 2. Run langdetect on the original text (handles native-script languages well)
+    ld_lang: Optional[str] = None
+    ld_prob: float = 0.0
+    try:
+        results = detect_langs(text)
+        if results:
+            ld_lang = results[0].lang
+            ld_prob = results[0].prob
+    except LangDetectException:
+        pass
+
+    # 3. Romanized Hindi / Hinglish
+    # langdetect sees Latin-script Hindi as English (often with low confidence).
+    english_like = ld_lang in ("en", None) or ld_prob < 0.6
+    if hi_score >= 0.10 and english_like:
+        if hi_score >= 0.25:
+            return "hi", get_language_label("hi"), round(hi_score, 2), "hi"
+        dominant = "hi" if hi_score >= 0.15 else "en"
+        return "mixed", get_language_label("mixed"), round(hi_score, 2), dominant
+
+    # 4. Spanish — ¿¡ punctuation is unambiguous even in short texts
     has_spanish_punct = "¿" in text or "¡" in text
+    if has_spanish_punct or (ld_lang == "es" and ld_prob > 0.35):
+        conf = ld_prob if ld_lang == "es" else 0.85
+        return "es", get_language_label("es"), round(conf, 2), "es"
 
-    spanish_hits = len(token_set & SPANISH_KEYWORDS) + (3 if has_spanish_punct else 0)
-    hindi_hits = len(token_set & HINDI_KEYWORDS)
-    english_hits = len(token_set & ENGLISH_STRONG_INDICATORS)
+    # 5. Hindi in Devanagari — langdetect handles native script reliably
+    if ld_lang == "hi" and ld_prob > 0.4:
+        return "hi", get_language_label("hi"), round(ld_prob, 2), "hi"
 
-    total_tokens = max(len(tokens), 1)
+    # 6. Any language langdetect is confident about
+    if ld_lang and ld_prob > 0.4:
+        return ld_lang, get_language_label(ld_lang), round(ld_prob, 2), ld_lang
 
-    # Normalise by sentence length
-    spanish_score = spanish_hits / total_tokens
-    hindi_score = hindi_hits / total_tokens
-    english_score = english_hits / total_tokens
+    # 7. Mild Romanized Hindi signal
+    if hi_score >= 0.06:
+        return "hi", get_language_label("hi"), round(hi_score, 2), "hi"
 
-    # Mixed detection: strong presence of both hindi and english
-    if hindi_score > 0.08 and english_score > 0.08:
-        return "mixed", LANGUAGE_LABELS["mixed"], round(min(hindi_score, english_score), 2)
+    # 8. Default to English
+    return "en", get_language_label("en"), 0.3, "en"
 
-    # Dominant language
-    scores = {"es": spanish_score, "hi": hindi_score, "en": english_score}
-    best = max(scores, key=lambda k: scores[k])
-    best_score = scores[best]
-
-    if best_score < 0.03:
-        # Try langdetect as fallback
-        try:
-            from langdetect import detect as ld_detect, DetectorFactory
-            DetectorFactory.seed = 0
-            ld_lang = ld_detect(text)
-            if ld_lang in ("es", "hi", "en"):
-                return ld_lang, LANGUAGE_LABELS.get(ld_lang, ld_lang), 0.5
-        except Exception:
-            pass
-        return "en", LANGUAGE_LABELS["en"], 0.3  # default to English
-
-    confidence = round(min(best_score * 5, 1.0), 2)
-    return best, LANGUAGE_LABELS[best], confidence
-
-
-def get_language_label(code: str) -> str:
-    return LANGUAGE_LABELS.get(code, "Unknown")

@@ -5,37 +5,23 @@ from datetime import datetime, timezone
 
 @dataclass
 class MemoryEntities:
+    """
+    Universal entity store — works across any conversation domain.
+    Only truly cross-domain facts are tracked as first-class fields.
+    Everything else (order details, trip parameters, food items, etc.)
+    is held by the LLM's tool_cache in SessionMemory.
+    """
     user_name: Optional[str] = None
-    order_id: Optional[str] = None
+    order_id: Optional[str] = None   # any reference / booking / order ID
     email: Optional[str] = None
-    order_status: Optional[str] = None
-    hotel_city: Optional[str] = None
-    hotel_budget: Optional[float] = None
-    hotel_people: Optional[int] = None
-    hotel_options: List[Dict[str, Any]] = field(default_factory=list)
-    selected_hotel_option: Optional[int] = None
-    booking_confirmed: bool = False
-    weather_cities: List[str] = field(default_factory=list)
-    food_order: Dict[str, Any] = field(default_factory=dict)
-    wants_tracking_link: bool = False
-    wants_refund: bool = False
+    context: Dict[str, Any] = field(default_factory=dict)  # free-form domain facts
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "user_name": self.user_name,
             "order_id": self.order_id,
             "email": self.email,
-            "order_status": self.order_status,
-            "hotel_city": self.hotel_city,
-            "hotel_budget": self.hotel_budget,
-            "hotel_people": self.hotel_people,
-            "hotel_options": self.hotel_options,
-            "selected_hotel_option": self.selected_hotel_option,
-            "booking_confirmed": self.booking_confirmed,
-            "weather_cities": self.weather_cities,
-            "food_order": self.food_order,
-            "wants_tracking_link": self.wants_tracking_link,
-            "wants_refund": self.wants_refund,
+            "context": self.context,
         }
 
     @classmethod
@@ -44,17 +30,7 @@ class MemoryEntities:
             user_name=d.get("user_name"),
             order_id=d.get("order_id"),
             email=d.get("email"),
-            order_status=d.get("order_status"),
-            hotel_city=d.get("hotel_city"),
-            hotel_budget=d.get("hotel_budget"),
-            hotel_people=d.get("hotel_people"),
-            hotel_options=d.get("hotel_options", []),
-            selected_hotel_option=d.get("selected_hotel_option"),
-            booking_confirmed=d.get("booking_confirmed", False),
-            weather_cities=d.get("weather_cities", []),
-            food_order=d.get("food_order", {}),
-            wants_tracking_link=d.get("wants_tracking_link", False),
-            wants_refund=d.get("wants_refund", False),
+            context=d.get("context", {}),
         )
 
 

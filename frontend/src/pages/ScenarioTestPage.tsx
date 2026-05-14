@@ -1,17 +1,33 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { SCENARIOS, type ScenarioTurn } from "../data/scenarios";
+import type { Scenario, ScenarioTurn } from "../data/scenarios";
 import ScenarioCard from "../components/ScenarioCard";
-import { apiChat } from "../api/client";
+import { apiChat, apiGetScenarios } from "../api/client";
 
 type Results = Record<number, { response?: string; loading?: boolean; error?: string }>;
 
 export default function ScenarioTestPage() {
-  // One session per scenario for isolation
-  const [sessionIds] = useState<Record<string, string>>(() =>
-    Object.fromEntries(SCENARIOS.map((s) => [s.name, uuidv4()]))
-  );
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  // One stable session per scenario name — keyed after load
+  const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
   const [allResults, setAllResults] = useState<Record<string, Results>>({});
+
+  useEffect(() => {
+    apiGetScenarios()
+      .then((data) => {
+        const loaded = data as Scenario[];
+        setScenarios(loaded);
+        // Initialise one session per scenario when the list arrives
+        setSessionIds((prev) => {
+          const next = { ...prev };
+          for (const s of loaded) {
+            if (!next[s.name]) next[s.name] = uuidv4();
+          }
+          return next;
+        });
+      })
+      .catch(() => null);
+  }, []);
 
   function setResult(
     scenarioName: string,
@@ -48,7 +64,7 @@ export default function ScenarioTestPage() {
   }
 
   async function runAllTurns(scenarioName: string) {
-    const scenario = SCENARIOS.find((s) => s.name === scenarioName);
+    const scenario = scenarios.find((s) => s.name === scenarioName);
     if (!scenario) return;
     for (const turn of scenario.turns) {
       await handleSendTurn(scenarioName, turn);
@@ -67,7 +83,7 @@ export default function ScenarioTestPage() {
       </div>
 
       <div className="grid gap-6">
-        {SCENARIOS.map((scenario) => (
+        {scenarios.map((scenario) => (
           <div key={scenario.name} className="space-y-2">
             <div className="flex items-center justify-between">
               <div />

@@ -88,10 +88,13 @@ async def voice_turn(
 
     # 3. Language detection (use ASR lang, refine with text rules)
     with TimedBlock(tracker, "language_detection_ms"):
-        text_lang, label, text_conf = detect_language_from_text(transcript)
+        text_lang, label, text_conf, text_respond_lang = detect_language_from_text(transcript)
         # Prefer ASR language detection for clean audio; text rules catch Hinglish better
         lang = text_lang if text_lang in ("mixed",) else (asr_lang or text_lang)
         label = get_language_label(lang)
+        # For mixed Hinglish, keep the text-derived dominant respond language;
+        # for everything else follow the resolved lang code.
+        respond_lang = text_respond_lang if text_lang == "mixed" else lang
 
     # 4. Memory update
     with TimedBlock(tracker, "memory_update_ms"):
@@ -106,7 +109,11 @@ async def voice_turn(
     with TimedBlock(tracker, "llm_ms"):
         memory_snap = session.to_dict()
         chat_history = session.get_chat_history(max_turns=8)
-        llm_result = await call_llm(transcript, lang, label, memory_snap, tool_ctx, chat_history)
+        llm_result = await call_llm(
+            transcript, lang, label, memory_snap, chat_history,
+            respond_language=respond_lang,
+            tool_context=tool_ctx,
+        )
 
     response_text: str = llm_result["response_text"]
     resp_lang = lang

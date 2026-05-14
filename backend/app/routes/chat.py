@@ -27,7 +27,7 @@ async def chat(req: ChatRequest):
 
     # 1. Language detection
     with TimedBlock(tracker, "language_detection_ms"):
-        lang, label, confidence = detect_language_from_text(req.text)
+        lang, label, confidence, respond_lang = detect_language_from_text(req.text)
 
     # 2. Memory update
     with TimedBlock(tracker, "memory_update_ms"):
@@ -39,7 +39,8 @@ async def chat(req: ChatRequest):
         memory_snap = session.to_dict()
         chat_history = session.get_chat_history(max_turns=6)
         llm_result = await call_llm(
-            req.text, lang, label, memory_snap, chat_history
+            req.text, lang, label, memory_snap, chat_history,
+            respond_language=respond_lang,
         )
 
     # Persist any tool results the agent fetched this turn into the session
@@ -110,7 +111,7 @@ async def chat(req: ChatRequest):
 
 @router.post("/detect-language", response_model=LanguageDetectResponse)
 async def detect_language(req: DetectLanguageRequest):
-    lang, label, confidence = detect_language_from_text(req.text)
+    lang, label, confidence, _ = detect_language_from_text(req.text)
     return LanguageDetectResponse(
         detected_language=lang, language_label=label, confidence=confidence
     )

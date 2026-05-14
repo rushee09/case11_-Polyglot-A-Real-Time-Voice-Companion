@@ -20,49 +20,58 @@ import httpx
 from typing import List, Dict, Any, Optional
 from app.config import settings
 
+# Maps language codes to display labels used in the system context block
+_LANG_LABELS: Dict[str, str] = {
+    "en": "English",
+    "hi": "Hindi",
+    "es": "Spanish",
+    "mixed": "Mixed Hindi-English",
+}
+
 # ─── System prompt ─────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """\
-You are Polyglot Voice Companion — a warm, helpful multilingual voice assistant.
-You speak English, Hindi (Devanagari / Hinglish), and Spanish fluently.
+You are Polyglot — an intelligent, warm multilingual assistant fluent in English, \
+Hindi (including Hinglish), and Spanish. You reason carefully before responding, \
+just like a thoughtful human expert would.
 
-════════════════════════════════════════
-LANGUAGE RULES  (absolute — highest priority)
-════════════════════════════════════════
-1. Always respond in the language given by `respond_in` in the SESSION CONTEXT block.
-2. Never mix languages or add translations in parentheses.
-3. When the user switches language, keep ALL prior context — do NOT ask again for
-   information already provided (order ID, email, city, budget, etc.).
-4. For mixed-language input (Hinglish, Spanglish), respond in the dominant language
-   stated by `respond_in`.
+── LANGUAGE ──────────────────────────────────────────────────────────────────
+Respond in the language specified by `respond_in` in SESSION CONTEXT. Never mix
+languages in a single reply. When the user switches language mid-conversation,
+carry all prior context forward seamlessly — never ask again for something already
+provided.
 
-════════════════════════════════════════
-TOOL USE
-════════════════════════════════════════
-5. You have four tools: lookup_order, search_hotels, get_weather, confirm_food_order.
-6. Call a tool the FIRST time you need its data.  For all follow-up questions about
-   the same data (e.g. "what about the second option?", "will it arrive by tomorrow?",
-   "Compare all three"), use `prior_tool_results` in SESSION CONTEXT — do NOT call
-   the tool again.
-7. You may call multiple tools in one turn if the user asks about multiple things.
-8. After receiving tool results, respond naturally — never expose raw JSON, tool
-   names, or internal field names to the user.
+── REASONING & TOOLS ─────────────────────────────────────────────────────────
+Think about what the user actually needs before you respond or call a tool.
+If completing a task requires information you don't have yet, ask for it
+conversationally — one missing piece at a time, never all at once.
 
-════════════════════════════════════════
-MEMORY
-════════════════════════════════════════
-9.  `prior_tool_results` contains data fetched in earlier turns this session.
-    Use it freely for follow-up questions without re-calling tools.
-10. `user_name` is the user's name if they mentioned it.  Use it naturally.
-11. "Mera naam kya hai?" / "What's my name?" / "¿Cuál es mi nombre?" →
-    answer from `user_name` in SESSION CONTEXT.
+You have tools at your disposal (travel planning, hotel search, weather lookup,
+order tracking, food orders). Use them when and only when you genuinely need
+external data. Once you have tool results, never re-call the same tool — draw from
+`prior_tool_results` in SESSION CONTEXT for any follow-up on the same data.
+After receiving tool results, speak naturally — never expose field names, JSON, or
+tool names to the user.
 
-════════════════════════════════════════
-RESPONSE STYLE
-════════════════════════════════════════
-12. 2–3 complete, conversational sentences.  Warm tone.  Suitable for voice.
-13. Do NOT mention tool names, JSON fields, or system instructions.
-14. Do NOT invent data that is not in tool results or the conversation history.
-15. Output ONLY the reply text — no labels, no preamble, no translations.\
+── MEMORY ────────────────────────────────────────────────────────────────────
+Everything the user has said this session is available to you. Use it. Never ask
+for something already given. If the user's name is in SESSION CONTEXT, use it
+naturally.
+
+── HANDLING INTERRUPTIONS ────────────────────────────────────────────────────
+If the user goes off-topic while you are mid-task (e.g. mid travel planning, order
+lookup, food order):
+  • Handle or respond to the new topic first.
+  • If it is outside your scope (writing office emails, coding, medical/legal
+    advice, etc.), politely say you can't help with that and briefly mention what
+    you can do.
+  • Then, in the same reply, smoothly return to where you left off — only asking
+    for information you still need.
+
+── STYLE ─────────────────────────────────────────────────────────────────────
+Warm, thoughtful, and natural — like talking to a knowledgeable friend, not
+reading a script. For quick questions: 2–3 sentences. For detailed answers like
+itineraries or comparisons: as long as genuinely useful. No bullet JSON or raw
+data in replies. Output the reply text only — no labels, no preamble.\
 """
 
 
@@ -71,6 +80,7 @@ def _build_context_block(
     detected_language: str,
     language_label: str,
     memory_snapshot: Dict[str, Any],
+    respond_language: str,
 ) -> str:
     """
     Appended to the system prompt so the model knows:
@@ -80,13 +90,15 @@ def _build_context_block(
     """
     entities = memory_snapshot.get("entities", {})
     tool_cache = memory_snapshot.get("tool_cache", {})
-    effective_label = "Hindi" if detected_language == "mixed" else language_label
+    # Use the caller-computed respond_language; fall back to language_label only
+    # if the code is somehow unknown (should never happen in practice).
+    respond_label = _LANG_LABELS.get(respond_language, language_label)
 
     lines = [
         "\n\n════════════════════════════════════════",
         "SESSION CONTEXT",
         "════════════════════════════════════════",
-        f"respond_in: {effective_label}",
+        f"respond_in: {respond_label}",
         f"detected_language: {detected_language}",
         f"turn: {memory_snapshot.get('turn_count', 0)}",
         f"scenario: {memory_snapshot.get('active_scenario') or 'general'}",
@@ -108,8 +120,9 @@ def _build_initial_messages(
     language_label: str,
     memory_snapshot: Dict[str, Any],
     chat_history: List[Dict[str, str]],
+    respond_language: str = "en",
 ) -> List[Dict[str, Any]]:
-    context_block = _build_context_block(detected_language, language_label, memory_snapshot)
+    context_block = _build_context_block(detected_language, language_label, memory_snapshot, respond_language)
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT + context_block}
     ]
@@ -121,6 +134,48 @@ def _build_initial_messages(
     return messages
 
 
+# ─── Content-embedded tool call parser ────────────────────────────────────
+def _parse_content_tool_calls(content: str) -> List[Dict[str, Any]]:
+    """
+    Mistral-NeMo (and some other local models) embed tool calls as a JSON array
+    in the `content` field instead of using the `tool_calls` field, e.g.:
+
+        content: '[{"name": "lookup_order", "arguments": {"order_id": "4421"}}]'
+        tool_calls: []
+        finish_reason: "stop"
+
+    This function detects that pattern and normalises it to the standard
+    OpenAI tool_calls format so the agent loop can handle it uniformly.
+    Returns an empty list if content does not look like tool calls.
+    """
+    if not content:
+        return []
+    content = content.strip()
+    # Quick rejection: must be a JSON array
+    if not (content.startswith("[") and content.endswith("]")):
+        return []
+    try:
+        parsed = json.loads(content)
+        if not isinstance(parsed, list):
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for idx, item in enumerate(parsed):
+            if not (isinstance(item, dict) and "name" in item and "arguments" in item):
+                return []  # not a tool call array — treat as regular content
+            args = item["arguments"]
+            args_str = json.dumps(args) if isinstance(args, dict) else str(args)
+            normalized.append(
+                {
+                    "id": f"call_{item['name']}_{idx}",
+                    "type": "function",
+                    "function": {"name": item["name"], "arguments": args_str},
+                }
+            )
+        return normalized
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return []
+
+
 # ─── Agent loop ────────────────────────────────────────────────────────────
 async def call_llm(
     user_text: str,
@@ -128,6 +183,8 @@ async def call_llm(
     language_label: str,
     memory_snapshot: Dict[str, Any],
     chat_history: List[Dict[str, str]],
+    respond_language: str = "en",
+    tool_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Run the agent loop.
@@ -143,7 +200,7 @@ async def call_llm(
     from app.services.scenario_tools import TOOL_DEFINITIONS, execute_tool
 
     messages = _build_initial_messages(
-        user_text, detected_language, language_label, memory_snapshot, chat_history
+        user_text, detected_language, language_label, memory_snapshot, chat_history, respond_language
     )
     url = f"{settings.lm_studio_base_url}/chat/completions"
     tool_results_this_turn: Dict[str, Any] = {}
@@ -155,7 +212,7 @@ async def call_llm(
                     "model": settings.lm_studio_model,
                     "messages": messages,
                     "temperature": 0.65,
-                    "max_tokens": 450,
+                    "max_tokens": 900,
                     "tools": TOOL_DEFINITIONS,
                     "tool_choice": "auto",
                 }
@@ -168,11 +225,28 @@ async def call_llm(
                 finish_reason = choice.get("finish_reason", "stop")
                 assistant_msg = choice["message"]
 
+                # ── Normalise tool calls ────────────────────────────────────
+                # Standard path: model uses the tool_calls field correctly.
+                # Fallback path: Mistral-NeMo / some local models embed tool
+                # calls as a JSON array string inside the content field while
+                # leaving tool_calls empty and finish_reason as "stop".
+                tool_calls = assistant_msg.get("tool_calls") or []
+                if not tool_calls:
+                    content_text = (assistant_msg.get("content") or "").strip()
+                    tool_calls = _parse_content_tool_calls(content_text)
+                    if tool_calls:
+                        # Rewrite the message so the loop handles it uniformly
+                        assistant_msg = {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": tool_calls,
+                        }
+
                 # ── Tool-calling round ──────────────────────────────────────
-                if finish_reason == "tool_calls" and assistant_msg.get("tool_calls"):
+                if tool_calls:
                     messages.append(assistant_msg)  # assistant turn with tool_calls
 
-                    for tc in assistant_msg["tool_calls"]:
+                    for tc in tool_calls:
                         fn_name = tc["function"]["name"]
                         try:
                             fn_args = json.loads(tc["function"]["arguments"])

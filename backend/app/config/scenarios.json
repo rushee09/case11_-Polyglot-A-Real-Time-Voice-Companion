@@ -1,0 +1,422 @@
+[
+  {
+    "name": "customer_support",
+    "title": "Customer Support — Order Status",
+    "description": "English → Hindi → English. Order context must survive both switches.",
+    "checklist_focus": ["language_switch_detection", "context_preservation", "tts_voice_match"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "en",
+        "user_text": "Hi, I need to check the status of my order. The order ID is 4421.",
+        "translation": null,
+        "expected_behavior": "Agent acknowledges in English and asks for account verification."
+      },
+      {
+        "turn_number": 2,
+        "language": "en",
+        "user_text": "Yes, the email on the account is rahul@example.com.",
+        "translation": null,
+        "expected_behavior": "Agent confirms order is out for delivery in English."
+      },
+      {
+        "turn_number": 3,
+        "language": "hi",
+        "user_text": "Theek hai, lekin delivery kal tak ho jaayegi kya?",
+        "translation": "OK, but will the delivery happen by tomorrow?",
+        "expected_behavior": "Agent switches to Hindi, retains order ID and email context, answers delivery question in Hindi."
+      },
+      {
+        "turn_number": 4,
+        "language": "hi",
+        "user_text": "Aur agar nahi hua toh refund mil sakta hai?",
+        "translation": "And if not, can I get a refund?",
+        "expected_behavior": "Agent continues in Hindi and answers the refund question using existing order context."
+      },
+      {
+        "turn_number": 5,
+        "language": "en",
+        "user_text": "Actually let's switch back — can you email me the tracking link?",
+        "translation": null,
+        "expected_behavior": "Agent switches back to English, still remembers order ID and email, answers about tracking."
+      }
+    ]
+  },
+  {
+    "name": "travel_hotel",
+    "title": "Travel Planning — Hotel Booking",
+    "description": "Spanish → English. Hotel options must be recalled after language switch.",
+    "checklist_focus": ["language_switch_detection", "context_preservation", "tts_voice_match"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "es",
+        "user_text": "Hola, quiero reservar un hotel en Bangalore para el próximo fin de semana.",
+        "translation": "Hello, I want to book a hotel in Bangalore for next weekend.",
+        "expected_behavior": "Agent responds entirely in Spanish."
+      },
+      {
+        "turn_number": 2,
+        "language": "es",
+        "user_text": "Para dos personas, presupuesto de 5000 rupias por noche.",
+        "translation": "For two people, budget of 5000 rupees per night.",
+        "expected_behavior": "Agent suggests hotel options in Spanish."
+      },
+      {
+        "turn_number": 3,
+        "language": "en",
+        "user_text": "Sorry, my Spanish is rusty. Can we continue in English? Tell me again about the second option.",
+        "translation": null,
+        "expected_behavior": "Agent switches to English and recalls the second hotel option from memory without re-calling the tool."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "Book it. Confirm the dates please.",
+        "translation": null,
+        "expected_behavior": "Agent confirms booking details in English, remembers city and guest count."
+      }
+    ]
+  },
+  {
+    "name": "food_order_switch",
+    "title": "Food Order — Hindi to English Modification",
+    "description": "Hindi → English. Food order must be remembered when user switches to modify it.",
+    "checklist_focus": ["language_switch_detection", "context_preservation", "code_switching"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "hi",
+        "user_text": "Mujhe do paneer burgers aur ek large fries chahiye.",
+        "translation": "I want two paneer burgers and one large fries.",
+        "expected_behavior": "Agent confirms the order in Hindi."
+      },
+      {
+        "turn_number": 2,
+        "language": "hi",
+        "user_text": "Aur ek cold coffee bhi add karo.",
+        "translation": "Also add one cold coffee.",
+        "expected_behavior": "Agent adds cold coffee to the existing order and confirms full order in Hindi."
+      },
+      {
+        "turn_number": 3,
+        "language": "en",
+        "user_text": "Wait, change the large fries to a small please.",
+        "translation": null,
+        "expected_behavior": "Agent switches to English, remembers the full prior order, confirms the update with changed fries size."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "What's my total order now?",
+        "translation": null,
+        "expected_behavior": "Agent lists the complete final order in English: 2 paneer burgers, 1 small fries, 1 cold coffee."
+      }
+    ]
+  },
+  {
+    "name": "trip_itinerary",
+    "title": "Trip Planning — Itinerary with Language Switch",
+    "description": "English → Spanish (budget) → English (itinerary). Agent gathers all 4 details conversationally.",
+    "checklist_focus": ["context_preservation", "language_switch_detection", "no_context_loss"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "en",
+        "user_text": "I want to plan a trip to Georgia.",
+        "translation": null,
+        "expected_behavior": "Agent asks one clarifying question — e.g. which region/city in Georgia — not all four at once."
+      },
+      {
+        "turn_number": 2,
+        "language": "en",
+        "user_text": "Tbilisi and the mountains. 5 days.",
+        "translation": null,
+        "expected_behavior": "Agent acknowledges destination and days, asks next missing detail (budget or people)."
+      },
+      {
+        "turn_number": 3,
+        "language": "es",
+        "user_text": "Mi presupuesto es de 800 dólares en total.",
+        "translation": "My budget is $800 total.",
+        "expected_behavior": "Agent switches to Spanish or stays in English based on respond_in, records the budget, asks about number of travelers."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "Just me, solo trip.",
+        "translation": null,
+        "expected_behavior": "Agent now has all four details — calls plan_trip and presents a day-by-day Georgia itinerary in English."
+      }
+    ]
+  },
+  {
+    "name": "code_switching",
+    "title": "Code-Switching — Mixed Hinglish Order",
+    "description": "Single utterance mixes Hindi and English. Agent handles gracefully without confusion.",
+    "checklist_focus": ["code_switching_handling", "context_preservation"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "mixed",
+        "user_text": "Mujhe ek pizza order karna hai, but make it veg only please.",
+        "translation": "I want to order a pizza, but make it veg only please.",
+        "expected_behavior": "Agent handles Hinglish gracefully, picks dominant language for response, records veg pizza order."
+      },
+      {
+        "turn_number": 2,
+        "language": "en",
+        "user_text": "And add a coke too.",
+        "translation": null,
+        "expected_behavior": "Agent remembers the veg pizza and adds coke — does NOT forget prior context."
+      },
+      {
+        "turn_number": 3,
+        "language": "hi",
+        "user_text": "Kitna time lagega delivery mein?",
+        "translation": "How long will the delivery take?",
+        "expected_behavior": "Agent switches to Hindi, answers delivery time question, still aware of the full food order."
+      }
+    ]
+  },
+  {
+    "name": "rapid_switching",
+    "title": "Rapid Language Switching — Weather Comparison",
+    "description": "English → Hindi → Spanish → English. Each turn uses a different language; final turn requires all three in memory.",
+    "checklist_focus": ["language_switch_detection", "context_preservation", "no_context_loss", "tts_voice_match"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "en",
+        "user_text": "What's the weather in Mumbai today?",
+        "translation": null,
+        "expected_behavior": "Agent answers Mumbai weather in English."
+      },
+      {
+        "turn_number": 2,
+        "language": "hi",
+        "user_text": "Aur Delhi mein?",
+        "translation": "And in Delhi?",
+        "expected_behavior": "Agent understands the implicit context (still weather) and answers Delhi weather in Hindi."
+      },
+      {
+        "turn_number": 3,
+        "language": "es",
+        "user_text": "¿Y en Chennai?",
+        "translation": "And in Chennai?",
+        "expected_behavior": "Agent understands context continues (weather) and answers Chennai in Spanish."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "Compare all three for me.",
+        "translation": null,
+        "expected_behavior": "Agent compares Mumbai, Delhi, and Chennai weather in English using prior tool results — does NOT re-call weather tools."
+      }
+    ]
+  },
+  {
+    "name": "interruption_recovery",
+    "title": "Interruption Recovery — Off-topic Mid-flow",
+    "description": "User starts a weather + trip planning flow, then asks something out of scope. Agent must decline and resume.",
+    "checklist_focus": ["context_preservation", "no_context_loss", "code_switching_handling"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "en",
+        "user_text": "What's the weather like in Goa right now?",
+        "translation": null,
+        "expected_behavior": "Agent answers Goa weather in English."
+      },
+      {
+        "turn_number": 2,
+        "language": "en",
+        "user_text": "I'm thinking of going there. Can you help me plan a 3-day trip for 2 people?",
+        "translation": null,
+        "expected_behavior": "Agent remembers Goa context from weather, starts gathering trip info — asks about budget."
+      },
+      {
+        "turn_number": 3,
+        "language": "en",
+        "user_text": "Write an email to my HR asking for 3 days leave.",
+        "translation": null,
+        "expected_behavior": "Agent politely says it can't draft office emails, briefly mentions what it can do, then resumes: asks for the budget to continue the Goa trip planning."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "Budget is around 15000 rupees total.",
+        "translation": null,
+        "expected_behavior": "Agent records the budget and calls plan_trip for Goa — 3 days, 2 people, ₹15000."
+      }
+    ]
+  },
+  {
+    "name": "multilingual_casual",
+    "title": "Multilingual Casual — Name + Language Recall",
+    "description": "User introduces themselves in Hindi, switches to Spanish, then English. Name and language context must persist.",
+    "checklist_focus": ["language_switch_detection", "context_preservation", "no_context_loss", "tts_voice_match"],
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "hi",
+        "user_text": "Mera naam Priya hai. Aaj ka weather kaisa hai Delhi mein?",
+        "translation": "My name is Priya. How is today's weather in Delhi?",
+        "expected_behavior": "Agent greets Priya by name and answers Delhi weather in Hindi."
+      },
+      {
+        "turn_number": 2,
+        "language": "es",
+        "user_text": "¿Y cuál es el clima en Chennai?",
+        "translation": "And what is the weather in Chennai?",
+        "expected_behavior": "Agent switches to Spanish, still knows the user's name is Priya, answers Chennai weather."
+      },
+      {
+        "turn_number": 3,
+        "language": "en",
+        "user_text": "What's my name?",
+        "translation": null,
+        "expected_behavior": "Agent answers 'Priya' in English — name was given in Hindi in turn 1 and must be remembered across language switches."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "Compare the two cities we discussed.",
+        "translation": null,
+        "expected_behavior": "Agent compares Delhi and Chennai weather from memory in English without re-calling tools."
+      }
+    ]
+  }
+]
+
+    "description": "English → Hindi → English with order context preserved across language switches.",
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "en",
+        "user_text": "Hi, I need to check the status of my order. The order ID is 4421.",
+        "translation": null,
+        "expected_behavior": "Agent acknowledges in English and asks for verification."
+      },
+      {
+        "turn_number": 2,
+        "language": "en",
+        "user_text": "Yes, the email on the account is rahul@example.com.",
+        "translation": null,
+        "expected_behavior": "Agent confirms order is out for delivery in English."
+      },
+      {
+        "turn_number": 3,
+        "language": "hi",
+        "user_text": "Theek hai, lekin delivery kal tak ho jaayegi kya?",
+        "translation": "OK, but will the delivery happen by tomorrow?",
+        "expected_behavior": "Agent switches to Hindi, retains order context, answers in Hindi."
+      },
+      {
+        "turn_number": 4,
+        "language": "hi",
+        "user_text": "Aur agar nahi hua toh refund mil sakta hai?",
+        "translation": "And if not, can I get a refund?",
+        "expected_behavior": "Agent continues in Hindi and answers refund question using order context."
+      },
+      {
+        "turn_number": 5,
+        "language": "en",
+        "user_text": "Actually let's switch back — can you email me the tracking link?",
+        "translation": null,
+        "expected_behavior": "Agent switches back to English and remembers order/email context."
+      }
+    ]
+  },
+  {
+    "name": "travel_planning",
+    "title": "Scenario 2 — Travel Planning: Hotel Booking",
+    "description": "Spanish → English with hotel options recalled across language switch.",
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "es",
+        "user_text": "Hola, quiero reservar un hotel en Bangalore para el próximo fin de semana.",
+        "translation": "Hello, I want to book a hotel in Bangalore for next weekend.",
+        "expected_behavior": "Agent responds in Spanish."
+      },
+      {
+        "turn_number": 2,
+        "language": "es",
+        "user_text": "Para dos personas, presupuesto de 5000 rupias por noche.",
+        "translation": "For two people, budget of 5000 rupees per night.",
+        "expected_behavior": "Agent suggests options in Spanish."
+      },
+      {
+        "turn_number": 3,
+        "language": "en",
+        "user_text": "Sorry, my Spanish is rusty. Can we continue in English? Tell me again about the second option.",
+        "translation": null,
+        "expected_behavior": "Agent switches to English and recalls the second hotel option."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "Book it. Confirm the dates please.",
+        "translation": null,
+        "expected_behavior": "Agent confirms booking details in English."
+      }
+    ]
+  },
+  {
+    "name": "code_switching",
+    "title": "Scenario 3 — Code-Switching Within an Utterance",
+    "description": "Mixed Hindi-English handled gracefully with context maintained.",
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "mixed",
+        "user_text": "Mujhe ek pizza order karna hai, but make it veg only please.",
+        "translation": "I want to order a pizza, but make it veg only please.",
+        "expected_behavior": "Agent handles mixed language gracefully — responds in dominant language or Hinglish. Documents its choice."
+      },
+      {
+        "turn_number": 2,
+        "language": "en",
+        "user_text": "And add a coke too.",
+        "translation": null,
+        "expected_behavior": "Agent remembers the veg pizza order and adds coke to the same order."
+      }
+    ]
+  },
+  {
+    "name": "rapid_switching",
+    "title": "Scenario 4 — Rapid Language Switching",
+    "description": "English → Hindi → Spanish → English with city comparison using memory.",
+    "turns": [
+      {
+        "turn_number": 1,
+        "language": "en",
+        "user_text": "What's the weather in Mumbai today?",
+        "translation": null,
+        "expected_behavior": "Agent answers about Mumbai weather in English."
+      },
+      {
+        "turn_number": 2,
+        "language": "hi",
+        "user_text": "Aur Delhi mein?",
+        "translation": "And in Delhi?",
+        "expected_behavior": "Agent understands context (still asking about weather) and answers in Hindi."
+      },
+      {
+        "turn_number": 3,
+        "language": "es",
+        "user_text": "¿Y en Chennai?",
+        "translation": "And in Chennai?",
+        "expected_behavior": "Agent understands context and answers in Spanish."
+      },
+      {
+        "turn_number": 4,
+        "language": "en",
+        "user_text": "Compare all three for me.",
+        "translation": null,
+        "expected_behavior": "Agent compares Mumbai, Delhi, and Chennai in English using prior memory."
+      }
+    ]
+  }
+]

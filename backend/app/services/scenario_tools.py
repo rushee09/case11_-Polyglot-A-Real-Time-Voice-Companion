@@ -37,8 +37,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "function": {
             "name": "search_hotels",
             "description": (
-                "Search for available hotels in a city. Call this when the user wants "
-                "to book accommodation or asks for hotel options in a specific location."
+                "Search for available hotels in a city with optional budget and guest count filters. "
+                "Use this when the user wants to find or book accommodation in a specific city."
             ),
             "parameters": {
                 "type": "object",
@@ -78,6 +78,39 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["city"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_trip",
+            "description": (
+                "Generate a detailed day-by-day travel itinerary for a given destination. "
+                "Call this when you have the destination, number of days, budget, and "
+                "number of travelers. If any of these are missing, ask the user first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "destination": {
+                        "type": "string",
+                        "description": "The destination country, region, or city (e.g. 'Georgia', 'Paris', 'Goa')",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Total number of days for the trip",
+                    },
+                    "budget": {
+                        "type": "string",
+                        "description": "Budget description, e.g. '$1000 total', '₹50000 per person', 'mid-range', 'budget'",
+                    },
+                    "people": {
+                        "type": "integer",
+                        "description": "Number of travelers",
+                    },
+                },
+                "required": ["destination", "days", "budget", "people"],
             },
         },
     },
@@ -132,6 +165,13 @@ def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             str(args.get("item", "pizza")),
             str(args.get("preference", "")),
             str(args.get("add_on", "")),
+        )
+    if name == "plan_trip":
+        return plan_trip(
+            str(args.get("destination", "")),
+            int(args.get("days", 3)),
+            str(args.get("budget", "mid-range")),
+            int(args.get("people", 1)),
         )
     return {"error": f"Unknown tool: {name}"}
 
@@ -238,114 +278,174 @@ def pizza_order_context(item: str = "pizza", preference: str = "vegetarian", add
     return {"found": True, "order": order}
 
 
+# ─── Destination knowledge base ──────────────────────────────────────────────
+
+_DESTINATIONS: Dict[str, Any] = {
+    "georgia": {
+        "display_name": "Georgia (Country)",
+        "capital": "Tbilisi",
+        "currency": "Georgian Lari (GEL) — 1 USD ≈ 2.7 GEL",
+        "language": "Georgian; English widely understood in tourist areas",
+        "best_time": "May–June and September–October (warm, not crowded)",
+        "visa": "Visa-free for most nationalities for up to 365 days",
+        "highlights": [
+            {
+                "place": "Tbilisi",
+                "description": "Charming Old Town (Kala), Narikala Fortress, sulphur bathhouses, Rustaveli Avenue, vibrant food & wine scene",
+                "recommended_days": 2,
+            },
+            {
+                "place": "Kazbegi (Stepantsminda)",
+                "description": "Stunning Caucasus mountains, Gergeti Trinity Church perched at 2,170 m, hiking trails, snow-capped peaks",
+                "recommended_days": 1,
+            },
+            {
+                "place": "Signagi & Kakheti",
+                "description": "Georgia's wine heartland — medieval walled town, traditional qvevri wine, Bodbe Monastery, rolling vineyards",
+                "recommended_days": 1,
+            },
+            {
+                "place": "Batumi",
+                "description": "Subtropical Black Sea resort city, botanical gardens, Ali & Nino sculpture, lively boulevard and beaches",
+                "recommended_days": 1,
+            },
+            {
+                "place": "Vardzia",
+                "description": "Magnificent 12th-century cave monastery carved into a cliff face, over 3,000 rooms and a church with original frescoes",
+                "recommended_days": 1,
+            },
+        ],
+        "food_must_try": ["Khinkali (dumplings)", "Khachapuri (cheese bread)", "Churchkhela", "Georgian wine", "Mtsvadi (grilled skewers)"],
+        "transport": "Marshrutkas (shared minibuses) between cities are cheap (~$2–5). Taxis & Bolt app in cities.",
+        "accommodation_range": "Hostel $15–25/night · Guesthouse $30–60/night · Boutique hotel $80–150/night",
+    },
+    "goa": {
+        "display_name": "Goa, India",
+        "capital": "Panaji",
+        "currency": "Indian Rupee (INR)",
+        "language": "Konkani, English, Hindi",
+        "best_time": "November–February (dry season)",
+        "visa": "Indian visa required for most international visitors",
+        "highlights": [
+            {"place": "North Goa (Calangute, Anjuna, Vagator)", "description": "Famous beaches, beach shacks, nightlife, flea markets", "recommended_days": 2},
+            {"place": "South Goa (Palolem, Agonda)", "description": "Quieter, pristine beaches, kayaking, dolphin watching", "recommended_days": 2},
+            {"place": "Panaji & Old Goa", "description": "Portuguese colonial architecture, Se Cathedral, spice plantations, casinos", "recommended_days": 1},
+        ],
+        "food_must_try": ["Fish curry rice", "Prawn balchão", "Bebinca", "Feni", "Sorpotel"],
+        "transport": "Scooter rental ₹300–400/day; taxis widely available",
+        "accommodation_range": "Budget beach hut ₹800–1500/night · Mid-range hotel ₹2500–5000/night · Resort ₹8000+/night",
+    },
+}
+
+
+def _build_day_plan(highlights: List[Dict[str, Any]], days: int) -> List[Dict[str, Any]]:
+    """Distribute highlights across available days."""
+    itinerary = []
+    day = 1
+    for h in highlights:
+        if day > days:
+            break
+        slots = min(h["recommended_days"], days - day + 1)
+        if slots == 1:
+            itinerary.append({"day": day, "place": h["place"], "focus": h["description"]})
+        else:
+            for s in range(slots):
+                label = "Arrival & first impressions" if s == 0 else "Deeper exploration"
+                itinerary.append({"day": day + s, "place": h["place"], "focus": label + " — " + h["description"]})
+        day += slots
+    # Fill remaining days with free/flex time at last destination
+    while day <= days:
+        last_place = itinerary[-1]["place"] if itinerary else "destination"
+        itinerary.append({"day": day, "place": last_place, "focus": "Leisure, local markets, spontaneous exploration"})
+        day += 1
+    return itinerary
+
+
+def plan_trip(destination: str, days: int, budget: str, people: int) -> Dict[str, Any]:
+    """Generate a day-by-day travel itinerary for any destination."""
+    dest_lower = destination.lower().strip()
+
+    # Match against known destinations
+    matched_key = next((k for k in _DESTINATIONS if k in dest_lower or dest_lower in k), None)
+
+    if matched_key:
+        d = _DESTINATIONS[matched_key]
+        day_plan = _build_day_plan(d["highlights"], days)
+        return {
+            "found": True,
+            "destination": d["display_name"],
+            "days": days,
+            "people": people,
+            "budget": budget,
+            "currency_info": d["currency"],
+            "language_info": d["language"],
+            "best_time_to_visit": d["best_time"],
+            "visa_info": d["visa"],
+            "day_by_day": day_plan,
+            "must_try_food": d["food_must_try"],
+            "transport_tip": d["transport"],
+            "accommodation_range": d["accommodation_range"],
+        }
+
+    # Generic fallback for unknown destinations
+    return {
+        "found": True,
+        "destination": destination,
+        "days": days,
+        "people": people,
+        "budget": budget,
+        "day_by_day": [
+            {"day": i + 1, "place": destination, "focus": f"Day {i+1}: Explore local culture, attractions, and cuisine"}
+            for i in range(days)
+        ],
+        "tips": [
+            "Check visa and entry requirements before booking",
+            "Book flights and accommodation well in advance",
+            "Research local customs and currency",
+        ],
+    }
+
+
 # ─── Entity extraction from text ────────────────────────────────────────────
 
 def extract_entities_from_text(text: str, memory_entities: Dict[str, Any]) -> Dict[str, Any]:
-    """Rule-based entity extraction — updates memory entities dict in place."""
-    text_lower = text.lower()
+    """
+    Extract universal entities from any user message.
+    Domain-specific data (hotel details, trip parameters, food items) is handled
+    by the LLM's tool_cache — not extracted here.
+    """
     updated = dict(memory_entities)
 
-    # User name extraction
-    # English: "my name is X", "I am X", "I'm X", "call me X"
-    name_match = re.search(
-        r"(?:my name is|i am|i'm|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-        text,
-    )
-    if name_match:
-        updated["user_name"] = name_match.group(1).strip()
-    # Hindi/Hinglish: "mera naam X hai", "mujhe X kehte hain"
+    # ── User name (English / Hindi / Spanish) ───────────────────────────────
     if not updated.get("user_name"):
-        hi_match = re.search(
+        for pattern in [
+            r"(?:my name is|i am|i'm|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
             r"(?:mera naam|mujhe)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
-            text,
-        )
-        if hi_match:
-            updated["user_name"] = hi_match.group(1).strip()
-    # Spanish: "me llamo X", "mi nombre es X"
-    if not updated.get("user_name"):
-        es_match = re.search(
             r"(?:me llamo|mi nombre es)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-            text,
-        )
-        if es_match:
-            updated["user_name"] = es_match.group(1).strip()
+        ]:
+            m = re.search(pattern, text)
+            if m:
+                updated["user_name"] = m.group(1).strip()
+                break
 
-    # Order ID extraction
-    if not updated.get("order_id"):
-        match = re.search(r"\border\s*(?:id|number|#)?\s*[:\-]?\s*(\d{4,})", text_lower)
-        if match:
-            updated["order_id"] = match.group(1)
-        # Also catch plain 4-digit numbers near "order"
-        if not updated.get("order_id"):
-            match2 = re.search(r"\b(4421|4422|4423)\b", text)
-            if match2:
-                updated["order_id"] = match2.group(1)
-
-    # Email extraction
+    # ── Email ────────────────────────────────────────────────────────────────
     if not updated.get("email"):
-        match = re.search(r"[\w.+-]+@[\w-]+\.[a-z]{2,}", text_lower)
-        if match:
-            updated["email"] = match.group(0)
+        m = re.search(r"[\w.+-]+@[\w-]+\.[a-z]{2,}", text.lower())
+        if m:
+            updated["email"] = m.group(0)
 
-    # Hotel city
-    for city in ["bangalore", "bengaluru", "mumbai", "delhi", "goa", "chennai"]:
-        if city in text_lower and not updated.get("hotel_city"):
-            updated["hotel_city"] = city.capitalize()
-
-    # Hotel budget
-    if not updated.get("hotel_budget"):
-        match = re.search(r"(\d{3,5})\s*(?:rupias|rupees|inr|rs\.?|₹)", text_lower)
-        if match:
-            updated["hotel_budget"] = float(match.group(1))
-
-    # People count
-    if not updated.get("hotel_people"):
-        match = re.search(r"\b(one|two|three|four|1|2|3|4)\s+(?:person|people|persons|adults)", text_lower)
-        if match:
-            word = match.group(1)
-            num_map = {"one": 1, "two": 2, "three": 3, "four": 4}
-            updated["hotel_people"] = num_map.get(word, int(word) if word.isdigit() else 2)
-        # Also check "dos personas" in Spanish
-        if re.search(r"dos\s+personas", text_lower):
-            updated["hotel_people"] = 2
-
-    # Weather cities
-    weather_cities = list(updated.get("weather_cities") or [])
-    for city in ["mumbai", "delhi", "chennai", "bangalore", "kolkata"]:
-        display = city.capitalize()
-        if city in text_lower and display not in weather_cities:
-            weather_cities.append(display)
-    updated["weather_cities"] = weather_cities
-
-    # Food order
-    food = dict(updated.get("food_order") or {})
-    if "pizza" in text_lower:
-        food["item"] = "pizza"
-    if any(w in text_lower for w in ["veg", "vegetarian", "veg only"]):
-        food["preference"] = "vegetarian"
-    if "coke" in text_lower or "cola" in text_lower:
-        food["add_on"] = "coke"
-    if food:
-        updated["food_order"] = food
-
-    # Hotel second option recall — English and Spanish
-    if updated.get("hotel_options") and not updated.get("selected_hotel_option"):
-        if re.search(r"\bsecond\s+option\b|\boption\s+2\b|\b2nd\b", text_lower):
-            updated["selected_hotel_option"] = 2
-        # Spanish: "segunda opción", "la segunda", "opción 2"
-        if re.search(r"\bsegunda\s+opci[oó]n\b|\bla\s+segunda\b|\bopci[oó]n\s+2\b", text_lower):
-            updated["selected_hotel_option"] = 2
-
-    # Booking confirmation — "book it", "confirm", "reservar" triggers booking_confirmed flag
-    if updated.get("selected_hotel_option") and not updated.get("booking_confirmed"):
-        if re.search(r"\bbook\s+it\b|\bconfirm\b|\breserv", text_lower):
-            updated["booking_confirmed"] = True
-
-    # Tracking / refund intent flags — used by LLM to give more specific answers
-    if re.search(r"\btrack(?:ing)?\s+link\b|\btracking\b", text_lower):
-        updated["wants_tracking_link"] = True
-    if re.search(r"\brefund\b|\bwapas\b|\bpaise\s+wapas\b", text_lower):
-        updated["wants_refund"] = True
+    # ── Reference / order ID (any 4-digit+ number near a keyword) ───────────
+    if not updated.get("order_id"):
+        m = re.search(
+            r"\b(?:order|booking|reference|ref|id|number)[:\s#-]*(\d{4,})", text.lower()
+        )
+        if m:
+            updated["order_id"] = m.group(1)
+        else:
+            # Fallback: lone 4–6 digit number (e.g. "order ID is 4421")
+            m = re.search(r"\b(\d{4,6})\b", text)
+            if m:
+                updated["order_id"] = m.group(1)
 
     return updated
 

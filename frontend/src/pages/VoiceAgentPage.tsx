@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import {
-  apiChat, apiVoiceTurn, apiHealth, speakText,
+  apiChat, apiVoiceTurn, apiHealth, apiGetScenarios, speakText,
   type ChatResponse, type HealthResponse,
 } from "../api/client";
-import { SCENARIOS } from "../data/scenarios";
+import type { Scenario } from "../data/scenarios";
 import ConversationPanel from "../components/ConversationPanel";
 import MicRecorder from "../components/MicRecorder";
 import TextChatBox from "../components/TextChatBox";
@@ -107,6 +107,7 @@ export default function VoiceAgentPage() {
     return initial.id;
   });
   const [voiceGender, setVoiceGender] = useState<"male" | "female">("male");
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [stage, setStage] = useState<PipelineStage>("idle");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -116,6 +117,9 @@ export default function VoiceAgentPage() {
 
   useEffect(() => {
     apiHealth().then(setHealth).catch(() => null);
+    apiGetScenarios()
+      .then((data) => setScenarios(data as Scenario[]))
+      .catch(() => null);
   }, []);
 
   // Persist chats to localStorage whenever they change (per user)
@@ -430,7 +434,7 @@ export default function VoiceAgentPage() {
               className="input text-xs py-1 w-40 flex-shrink-0"
             >
               <option value="">No scenario</option>
-              {SCENARIOS.map((s) => (
+              {scenarios.map((s) => (
                 <option key={s.name} value={s.name}>{s.title.split("—")[0].trim()}</option>
               ))}
             </select>
