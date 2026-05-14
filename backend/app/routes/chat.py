@@ -34,7 +34,7 @@ async def chat(req: ChatRequest):
     # 4. LLM
     with TimedBlock(tracker, "llm_ms"):
         memory_snap = session.to_dict()
-        chat_history = session.get_chat_history(max_turns=8)
+        chat_history = session.get_chat_history(max_turns=6)
         llm_result = await call_llm(
             req.text, lang, label, memory_snap, tool_ctx, chat_history
         )
@@ -44,8 +44,10 @@ async def chat(req: ChatRequest):
     resp_lang = lang
     resp_label = label
 
-    # 5. Record assistant turn
-    record_assistant_turn(session, response_text, resp_lang)
+    # 5. Record assistant turn — skip fallback responses so they don't
+    #    re-enter chat history and trigger another Channel Error on the next turn.
+    if not llm_result.get("fallback_mode", False):
+        record_assistant_turn(session, response_text, resp_lang)
 
     # 6. Store logs
     latency_dict = tracker.to_dict()

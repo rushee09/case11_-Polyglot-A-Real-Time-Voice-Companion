@@ -23,9 +23,17 @@ HINDI_KEYWORDS = {
     "theek", "lekin", "kal", "tak", "jaayegi", "kya", "aur", "agar",
     "nahi", "mil", "sakta", "mujhe", "karna", "hai", "hoga", "mere",
     "mera", "yeh", "woh", "toh", "bhi", "sab", "karo", "chahiye",
-    "jaldi", "bahut", "accha", "paisa", "ho", "se", "ke", "ka",
+    "jaldi", "bahut", "accha", "acha", "paisa", "ho", "se", "ke", "ka",
     "ki", "nahin", "refund", "delivery", "order", "please", "pizza",
     "veg", "aaj", "kal",
+    # common connectors / pronouns / verbs missed before
+    "mein", "tum", "aap", "main", "hum", "unhe", "usse", "unka",
+    "kaise", "kaisa", "kaisi", "jawab", "hindi", "bolo", "boliye",
+    "batao", "bataiye", "dijiye", "do", "suniye", "samajh", "samajhiye",
+    "bolna", "chahta", "chahti", "likhiye", "likhna", "padhiye",
+    "hain", "tha", "thi", "the", "raha", "rahi", "rahe",
+    "hay", "hua", "huye", "naam", "kuch", "koi", "sab", "sabhi",
+    "pyar", "desh", "bharat", "duniya", "log", "ghar", "kaam",
 }
 
 ENGLISH_STRONG_INDICATORS = {
@@ -34,6 +42,31 @@ ENGLISH_STRONG_INDICATORS = {
     "please", "thank", "what", "where", "when", "how", "need", "want",
     "check", "status", "order", "email", "booking", "hotel", "weather",
 }
+
+
+# Explicit language-switch instruction patterns.
+# These override keyword scoring so "jawab Hindi mein dijiye" is never
+# mis-classified as English.
+_EXPLICIT_LANG_PATTERNS = [
+    # Hindi instruction patterns
+    (re.compile(r"\b(hindi|hindustani)\s*(mein|main|me|m)\b", re.I), "hi"),
+    (re.compile(r"\b(jawab|reply|ans|answer|bolo|boliye|batao|bataiye)\s+.{0,20}\b(hindi|hindustani)\b", re.I), "hi"),
+    (re.compile(r"\b(speak|respond|answer|reply|write)\s+in\s+hindi\b", re.I), "hi"),
+    # English instruction patterns
+    (re.compile(r"\b(speak|respond|answer|reply|write)\s+in\s+english\b", re.I), "en"),
+    (re.compile(r"\bin\s+english\s+(please|boliye|dijiye|karo)?\b", re.I), "en"),
+    # Spanish instruction patterns
+    (re.compile(r"\b(habla|responde|contesta|escribe)\s+en\s+espa[nñ]ol\b", re.I), "es"),
+    (re.compile(r"\ben\s+espa[nñ]ol\b", re.I), "es"),
+]
+
+
+def _check_explicit_language_instruction(text: str) -> Optional[str]:
+    """Return a forced language code if the user is explicitly requesting a language."""
+    for pattern, lang_code in _EXPLICIT_LANG_PATTERNS:
+        if pattern.search(text):
+            return lang_code
+    return None
 
 
 def _tokenize(text: str) -> list[str]:
@@ -48,6 +81,11 @@ def detect_language_from_text(text: str) -> Tuple[str, str, Optional[float]]:
     Rule-based language detection.
     Returns (language_code, label, confidence).
     """
+    # Check for explicit language-switch instruction first — highest priority
+    explicit = _check_explicit_language_instruction(text)
+    if explicit:
+        return explicit, LANGUAGE_LABELS[explicit], 1.0
+
     tokens = _tokenize(text)
     token_set = set(tokens)
 

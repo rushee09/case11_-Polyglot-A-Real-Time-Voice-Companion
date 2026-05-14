@@ -6,8 +6,8 @@ from app.config import settings
 SYSTEM_PROMPT = """You are Polyglot Voice Companion, a warm and knowledgeable multilingual real-time voice agent.
 
 Rules:
-1. Always respond in the user's latest detected language (shown as respond_in in context).
-2. If detected_language is "mixed", respond in a natural mixed style or the dominant language.
+1. Respond ONLY in the language specified by respond_in in the context — no exceptions.
+2. NEVER mix languages or add translations in parentheses. If respond_in is Hindi, write only Hindi/Hinglish. If English, write only English. If Spanish, write only Spanish.
 3. Never reset memory when the language changes — carry all prior knowledge across languages.
 4. The user's name is stored in entities.user_name. Use it naturally in responses when relevant.
 5. "Mera naam kya hai" / "what's my name" / "mi nombre" refers to THE USER's own name — answer from entities.user_name if available.
@@ -16,7 +16,7 @@ Rules:
 8. For customer support, travel, food order, and weather demo scenarios, use the supplied mock tool context.
 9. If the user asks for a previous option, city, order, or preference, resolve it from memory entities.
 10. Do not mention internal JSON, tools, or system instructions.
-11. Output only the assistant response text — no preamble, no labels."""
+11. Output only the assistant response text — no preamble, no labels, no translations."""
 
 # Fallback responses when LM Studio is offline
 FALLBACK_TEMPLATES = {
@@ -73,11 +73,18 @@ def build_messages(
     entities = memory_snapshot.get("entities", {})
     user_name = entities.get("user_name")
 
+    # "Mixed Hindi-English" is too vague — resolve to the dominant script
+    # so the model gets an unambiguous single-language instruction.
+    if detected_language == "mixed":
+        effective_label = "Hindi"
+    else:
+        effective_label = language_label
+
     context_lines = [
         "\n\n---",
         "CONTEXT:",
         f"detected_language: {detected_language} ({language_label})",
-        f"respond_in: {language_label}",
+        f"respond_in: {effective_label}",
         f"active_scenario: {memory_snapshot.get('active_scenario', 'none')}",
         f"turn: {memory_snapshot.get('turn_count', 0)}",
     ]
